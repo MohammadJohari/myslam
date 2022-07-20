@@ -201,7 +201,7 @@ def get_tensor_from_camera(RT, Tquad=False):
     return tensor
 
 
-def raw2outputs_nerf_color(raw, z_vals, rays_d, occupancy=False, device='cuda:0'):
+def raw2outputs_nerf_color(raw, z_vals, rays_d, truncation, occupancy=False, device='cuda:0'):
     """
     Transforms model's predictions to semantically meaningful values.
 
@@ -225,6 +225,19 @@ def raw2outputs_nerf_color(raw, z_vals, rays_d, occupancy=False, device='cuda:0'
         return 1. - torch.exp(-F.softplus(20 * raw))
         # return 1. - torch.exp(-F.softplus(raw) * dists * 10)
 
+    def sdf2weights(sdf, truncation, z_vals):
+        weights = torch.sigmoid(sdf / truncation) * torch.sigmoid(-sdf / truncation)
+
+        signs = sdf[:, 1:] * sdf[:, :-1]
+        mask = torch.where(signs < 0.0, torch.ones_like(signs), torch.zeros_like(signs))
+        inds = torch.argmax(mask, axis=1)
+        inds = inds[..., None]
+        z_min = torch.gather(z_vals, 1, inds) # The first surface
+        mask = torch.where(z_vals < z_min + sc_factor * truncation, torch.ones_like(z_vals), torch.zeros_like(z_vals))
+
+        weights = weights * mask
+        return weights / (torch.sum(weights, axis=-1, keepdims=True) + 1e-8)
+
     dists = z_vals[..., 1:] - z_vals[..., :-1]
     dists = dists.float()
     dists = torch.cat([dists, torch.Tensor([1e10]).float().to(
@@ -233,16 +246,20 @@ def raw2outputs_nerf_color(raw, z_vals, rays_d, occupancy=False, device='cuda:0'
     # different ray angle corresponds to different unit length
     dists = dists * torch.norm(rays_d[..., None, :], dim=-1)
     rgb = raw[..., :-1]
-    if occupancy:
-        raw[..., 3] = torch.sigmoid(10*raw[..., -1])
-        alpha = raw[..., -1]
+    sdf = True
+    if not sdf:
+        if occupancy:
+            raw[..., 3] = torch.sigmoid(10*raw[..., -1])
+            alpha = raw[..., -1]
+        else:
+            # original nerf, volume density
+            alpha = raw2alpha(raw[..., -1], dists)  # (N_rays, N_samples)
+
+        weights = alpha.float() * torch.cumprod(torch.cat([torch.ones((alpha.shape[0], 1)).to(
+            device).float(), (1.-alpha + 1e-10).float()], -1).float(), -1)[:, :-1]
     else:
-        # original nerf, volume density
-        alpha = raw2alpha(raw[..., -1], dists)  # (N_rays, N_samples)
-
-    weights = alpha.float() * torch.cumprod(torch.cat([torch.ones((alpha.shape[0], 1)).to(
-        device).float(), (1.-alpha + 1e-10).float()], -1).float(), -1)[:, :-1]
-
+        weights = sdf2weights(raw[..., -1], truncation, z_vals)  # (N_rays, N_samples)
+    
     prob = weights / weights.sum(-1, keepdim=True)
     entr = (- torch.log(prob + 1e-12) * prob).sum(-1)
     

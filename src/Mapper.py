@@ -42,6 +42,7 @@ class Mapper(object):
         self.decoders = slam.shared_decoders
         self.estimate_c2w_list = slam.estimate_c2w_list
         self.mapping_first_frame = slam.mapping_first_frame
+        self.truncation = slam.truncation
 
         self.scale = cfg['scale']
         self.coarse = cfg['coarse']
@@ -481,7 +482,7 @@ class Mapper(object):
                 batch_gt_depth = batch_gt_depth[inside_mask]
                 batch_gt_color = batch_gt_color[inside_mask]
             ret = self.renderer.render_batch_ray(c, self.decoders, batch_rays_d,
-                                                 batch_rays_o, device, self.stage,
+                                                 batch_rays_o, device, self.stage, self.truncation,
                                                  gt_depth=None if self.coarse_mapper else batch_gt_depth)
             depth, uncertainty, color, entr = ret
 

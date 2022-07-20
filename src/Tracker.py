@@ -41,6 +41,7 @@ class Tracker(object):
         self.mapping_cnt = slam.mapping_cnt
         self.shared_decoders = slam.shared_decoders
         self.estimate_c2w_list = slam.estimate_c2w_list
+        self.truncation = slam.truncation
 
         self.cam_lr = cfg['tracking']['lr']
         self.device = cfg['tracking']['device']
