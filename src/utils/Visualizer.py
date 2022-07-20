@@ -12,13 +12,14 @@ class Visualizer(object):
 
     """
 
-    def __init__(self, freq, inside_freq, vis_dir, renderer, verbose, device='cuda:0'):
+    def __init__(self, freq, inside_freq, vis_dir, renderer, truncation, verbose, device='cuda:0'):
         self.freq = freq
         self.device = device
         self.vis_dir = vis_dir
         self.verbose = verbose
         self.renderer = renderer
         self.inside_freq = inside_freq
+        self.truncation = truncation
         os.makedirs(f'{vis_dir}', exist_ok=True)
 
     def vis(self, idx, iter, gt_depth, gt_color, c2w_or_camera_tensor, c,
@@ -54,6 +55,7 @@ class Visualizer(object):
                     c,
                     decoders,
                     c2w,
+                    self.truncation,
                     self.device,
                     stage='color',
                     gt_depth=gt_depth)

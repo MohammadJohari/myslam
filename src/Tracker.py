@@ -67,7 +67,7 @@ class Tracker(object):
             self.frame_reader, batch_size=1, shuffle=False, num_workers=1)
         self.visualizer = Visualizer(freq=cfg['tracking']['vis_freq'], inside_freq=cfg['tracking']['vis_inside_freq'],
                                      vis_dir=os.path.join(self.output, 'vis' if 'Demo' in self.output else 'tracking_vis'),
-                                     renderer=self.renderer, verbose=self.verbose, device=self.device)
+                                     renderer=self.renderer, truncation=self.truncation, verbose=self.verbose, device=self.device)
         self.H, self.W, self.fx, self.fy, self.cx, self.cy = slam.H, slam.W, slam.fx, slam.fy, slam.cx, slam.cy
 
     def optimize_cam_in_batch(self, camera_tensor, gt_color, gt_depth, batch_size, optimizer):

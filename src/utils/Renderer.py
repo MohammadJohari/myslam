@@ -197,7 +197,7 @@ class Renderer(object):
 
         return depth, uncertainty, color, entr
 
-    def render_img(self, c, decoders, c2w, device, stage, gt_depth=None):
+    def render_img(self, c, decoders, c2w, truncation, device, stage, gt_depth=None):
         """
         Renders out depth, uncertainty, and color images.
 
@@ -238,7 +238,7 @@ class Renderer(object):
                 else:
                     gt_depth_batch = gt_depth[i:i+ray_batch_size]
                     ret = self.render_batch_ray(
-                        c, decoders, rays_d_batch, rays_o_batch, device, stage, gt_depth=gt_depth_batch)
+                        c, decoders, rays_d_batch, rays_o_batch, device, stage, truncation, gt_depth=gt_depth_batch)
 
                 depth, uncertainty, color, _ = ret
                 depth_list.append(depth.double())

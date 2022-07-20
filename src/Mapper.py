@@ -89,7 +89,7 @@ class Mapper(object):
         if 'Demo' not in self.output:  # disable this visualization in demo
             self.visualizer = Visualizer(freq=cfg['mapping']['vis_freq'], inside_freq=cfg['mapping']['vis_inside_freq'],
                                          vis_dir=os.path.join(self.output, 'mapping_vis'), renderer=self.renderer,
-                                         verbose=self.verbose, device=self.device)
+                                         truncation=self.truncation, verbose=self.verbose, device=self.device)
         self.H, self.W, self.fx, self.fy, self.cx, self.cy = slam.H, slam.W, slam.fx, slam.fy, slam.cx, slam.cy
 
     def get_mask_from_c2w(self, c2w, key, val_shape, depth_np):
