@@ -92,6 +92,17 @@ class Mapper(object):
                                          truncation=self.truncation, verbose=self.verbose, device=self.device)
         self.H, self.W, self.fx, self.fy, self.cx, self.cy = slam.H, slam.W, slam.fx, slam.fy, slam.cx, slam.cy
 
+    def sdf_loss(self, sdf, z_vals, gt_depth):
+        print(sdf.shape, z_vals.shape, gt_depth.shape)
+        
+        front_mask = torch.where(z_vals < (gt_depth - self.truncation), torch.ones_like(z_vals), torch.zeros_like(z_vals))
+        back_mask = torch.where(z_vals > (gt_depth + self.truncation), torch.ones_like(z_vals), torch.zeros_like(z_vals))
+        sdf_mask = (1.0 - front_mask) * (1.0 - back_mask)
+
+        fs_loss = sdf[front_mask] - torch.ones_like(sdf[front_mask])
+
+        return fs_loss
+
     def get_mask_from_c2w(self, c2w, key, val_shape, depth_np):
         """
         Frustum feature selection based on current camera pose and depth image.
@@ -484,15 +495,19 @@ class Mapper(object):
             ret = self.renderer.render_batch_ray(c, self.decoders, batch_rays_d,
                                                  batch_rays_o, device, self.stage, self.truncation,
                                                  gt_depth=None if self.coarse_mapper else batch_gt_depth)
-            depth, uncertainty, color, entr = ret
+            depth, uncertainty, color, entr, sdf, z_vals = ret
 
             depth_mask = (batch_gt_depth > 0)
-            loss = torch.abs(
-                batch_gt_depth[depth_mask]-depth[depth_mask]).sum()
-            if ((not self.nice) or (self.stage == 'color')):
-                color_loss = torch.abs(batch_gt_color - color).sum()
-                weighted_color_loss = self.w_color_loss*color_loss
-                loss += weighted_color_loss
+            ################### OLD Loss ################
+            # loss = torch.abs(
+            #     batch_gt_depth[depth_mask]-depth[depth_mask]).sum()
+            # if ((not self.nice) or (self.stage == 'color')):
+            #     color_loss = torch.abs(batch_gt_color - color).sum()
+            #     weighted_color_loss = self.w_color_loss*color_loss
+            #     loss += weighted_color_loss
+            ##############################################
+
+            loss = sdf_loss(sdf[depth_mask], z_vals[depth_mask], batch_gt_depth[depth_mask])
 
             # for imap*, it use volume density
             # regulation = (not self.occupancy)

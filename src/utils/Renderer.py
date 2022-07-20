@@ -178,24 +178,27 @@ class Renderer(object):
 
         depth, uncertainty, color, weights, entr = raw2outputs_nerf_color(
             raw, z_vals, rays_d, truncation, occupancy=self.occupancy, device=device)
-        if N_importance > 0:
-            z_vals_mid = .5 * (z_vals[..., 1:] + z_vals[..., :-1])
-            z_samples = sample_pdf(
-                z_vals_mid, weights[..., 1:-1], N_importance, det=(self.perturb == 0.), device=device)
-            z_samples = z_samples.detach()
-            z_vals, _ = torch.sort(torch.cat([z_vals, z_samples], -1), -1)
 
-            pts = rays_o[..., None, :] + \
-                rays_d[..., None, :] * z_vals[..., :, None]
-            pts = pts.reshape(-1, 3)
-            raw = self.eval_points(pts, decoders, c, stage, device)
-            raw = raw.reshape(N_rays, N_samples+N_importance+N_surface, -1)
+        sdf = raw[..., -1]
 
-            depth, uncertainty, color, weights = raw2outputs_nerf_color(
-                raw, z_vals, rays_d, truncation, occupancy=self.occupancy, device=device)
-            return depth, uncertainty, color
+        # if N_importance > 0:
+        #     z_vals_mid = .5 * (z_vals[..., 1:] + z_vals[..., :-1])
+        #     z_samples = sample_pdf(
+        #         z_vals_mid, weights[..., 1:-1], N_importance, det=(self.perturb == 0.), device=device)
+        #     z_samples = z_samples.detach()
+        #     z_vals, _ = torch.sort(torch.cat([z_vals, z_samples], -1), -1)
 
-        return depth, uncertainty, color, entr
+        #     pts = rays_o[..., None, :] + \
+        #         rays_d[..., None, :] * z_vals[..., :, None]
+        #     pts = pts.reshape(-1, 3)
+        #     raw = self.eval_points(pts, decoders, c, stage, device)
+        #     raw = raw.reshape(N_rays, N_samples+N_importance+N_surface, -1)
+
+        #     depth, uncertainty, color, weights = raw2outputs_nerf_color(
+        #         raw, z_vals, rays_d, truncation, occupancy=self.occupancy, device=device)
+        #     return depth, uncertainty, color
+
+        return depth, uncertainty, color, entr, sdf, z_vals
 
     def render_img(self, c, decoders, c2w, truncation, device, stage, gt_depth=None):
         """
@@ -240,7 +243,7 @@ class Renderer(object):
                     ret = self.render_batch_ray(
                         c, decoders, rays_d_batch, rays_o_batch, device, stage, truncation, gt_depth=gt_depth_batch)
 
-                depth, uncertainty, color, _ = ret
+                depth, uncertainty, color, _, _, _ = ret
                 depth_list.append(depth.double())
                 uncertainty_list.append(uncertainty.double())
                 color_list.append(color)

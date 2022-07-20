@@ -107,7 +107,7 @@ class Tracker(object):
 
         ret = self.renderer.render_batch_ray(
             self.c, self.decoders, batch_rays_d, batch_rays_o,  self.device, stage='color',  gt_depth=batch_gt_depth)
-        depth, uncertainty, color, _ = ret
+        depth, uncertainty, color, _, _, _ = ret
 
         uncertainty = uncertainty.detach()
         if self.handle_dynamic:

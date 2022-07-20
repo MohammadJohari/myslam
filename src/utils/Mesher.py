@@ -542,7 +542,7 @@ class Mesher(object):
                         rays_d_batch = rays_d[i:i+batch_size]
                         rays_o_batch = rays_o[i:i+batch_size]
                         gt_depth_batch = gt_depth[i:i+batch_size]
-                        depth, uncertainty, color, _ = self.renderer.render_batch_ray(
+                        depth, uncertainty, color, _, _, _ = self.renderer.render_batch_ray(
                             c, decoders, rays_d_batch, rays_o_batch, device, 
                             stage='color', gt_depth=gt_depth_batch)
                         color_list.append(color)
