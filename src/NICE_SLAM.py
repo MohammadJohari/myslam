@@ -240,8 +240,7 @@ class NICE_SLAM():
         self.fine_val_shape = fine_val_shape
         val_shape = [1, o_dim, *fine_val_shape]
         # fine_val = torch.zeros(val_shape).normal_(mean=0, std=0.0001)
-        # fine_val = torch.zeros(val_shape)
-        fine_val = torch.ones(val_shape)
+        fine_val = torch.zeros(val_shape)
         c[fine_key] = fine_val
 
         color_key = 'grid_color'

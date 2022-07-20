@@ -93,8 +93,6 @@ class Mapper(object):
         self.H, self.W, self.fx, self.fy, self.cx, self.cy = slam.H, slam.W, slam.fx, slam.fy, slam.cx, slam.cy
 
     def sdf_loss(self, sdf, z_vals, gt_depth):
-        print(sdf.shape, z_vals.shape, gt_depth.shape)
-
         front_mask = torch.where(z_vals < (gt_depth[:, None] - self.truncation), torch.ones_like(z_vals), torch.zeros_like(z_vals)).bool()
         back_mask = torch.where(z_vals > (gt_depth[:, None] + self.truncation), torch.ones_like(z_vals), torch.zeros_like(z_vals)).bool()
         sdf_mask = (~front_mask) * (~back_mask)
