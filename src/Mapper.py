@@ -99,9 +99,12 @@ class Mapper(object):
         back_mask = torch.where(z_vals > (gt_depth[:, None] + self.truncation), torch.ones_like(z_vals), torch.zeros_like(z_vals)).bool()
         sdf_mask = (~front_mask) * (~back_mask)
 
-        fs_loss = sdf[front_mask] - torch.ones_like(sdf[front_mask])
+        fs_loss = torch.mean(torch.square(sdf[front_mask] - torch.ones_like(sdf[front_mask])))
+        sdf_loss = torch.mean(torch.square((z_vals + sdf * self.truncation)[sdf_mask] - gt_depth[sdf_mask]))
 
-        return fs_loss
+        print('fs: ', fs_loss, 'sdf: ', sdf_loss)
+
+        return 10 * fs_loss + 6000 * sdf_loss
 
     def get_mask_from_c2w(self, c2w, key, val_shape, depth_np):
         """
