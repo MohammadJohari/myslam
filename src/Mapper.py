@@ -94,7 +94,7 @@ class Mapper(object):
 
     def sdf_loss(self, sdf, z_vals, gt_depth):
         print(sdf.shape, z_vals.shape, gt_depth.shape)
-        
+
         front_mask = torch.where(z_vals < (gt_depth - self.truncation), torch.ones_like(z_vals), torch.zeros_like(z_vals))
         back_mask = torch.where(z_vals > (gt_depth + self.truncation), torch.ones_like(z_vals), torch.zeros_like(z_vals))
         sdf_mask = (1.0 - front_mask) * (1.0 - back_mask)
@@ -507,7 +507,7 @@ class Mapper(object):
             #     loss += weighted_color_loss
             ##############################################
 
-            loss = sdf_loss(sdf[depth_mask], z_vals[depth_mask], batch_gt_depth[depth_mask])
+            loss = self.sdf_loss(sdf[depth_mask], z_vals[depth_mask], batch_gt_depth[depth_mask])
 
             # for imap*, it use volume density
             # regulation = (not self.occupancy)
