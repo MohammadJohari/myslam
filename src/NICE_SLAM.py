@@ -16,7 +16,6 @@ from src.utils.Renderer import Renderer
 
 torch.multiprocessing.set_sharing_strategy('file_system')
 
-
 class NICE_SLAM():
     """
     NICE_SLAM main class.
@@ -88,6 +87,10 @@ class NICE_SLAM():
         self.shared_decoders = self.shared_decoders.to(
             self.cfg['mapping']['device'])
         self.shared_decoders.share_memory()
+        
+        ## New params
+        self.truncation = 0.05
+
         self.renderer = Renderer(cfg, args, self)
         self.mesher = Mesher(cfg, args, self)
         self.logger = Logger(cfg, args, self)
@@ -208,6 +211,7 @@ class NICE_SLAM():
 
         c = {}
         c_dim = cfg['model']['c_dim']
+        o_dim = 1
         xyz_len = self.bound[:, 1]-self.bound[:, 0]
 
         if self.coarse:
@@ -224,16 +228,20 @@ class NICE_SLAM():
         middle_val_shape = list(map(int, (xyz_len/middle_grid_len).tolist()))
         middle_val_shape[0], middle_val_shape[2] = middle_val_shape[2], middle_val_shape[0]
         self.middle_val_shape = middle_val_shape
-        val_shape = [1, c_dim, *middle_val_shape]
-        middle_val = torch.zeros(val_shape).normal_(mean=0, std=0.01)
+        val_shape = [1, o_dim, *middle_val_shape]
+        # middle_val = torch.zeros(val_shape).normal_(mean=0, std=0.01)
+        # middle_val = torch.zeros(val_shape).normal_(mean=0, std=0.01).abs()
+        middle_val = torch.ones(val_shape)
         c[middle_key] = middle_val
 
         fine_key = 'grid_fine'
         fine_val_shape = list(map(int, (xyz_len/fine_grid_len).tolist()))
         fine_val_shape[0], fine_val_shape[2] = fine_val_shape[2], fine_val_shape[0]
         self.fine_val_shape = fine_val_shape
-        val_shape = [1, c_dim, *fine_val_shape]
-        fine_val = torch.zeros(val_shape).normal_(mean=0, std=0.0001)
+        val_shape = [1, o_dim, *fine_val_shape]
+        # fine_val = torch.zeros(val_shape).normal_(mean=0, std=0.0001)
+        # fine_val = torch.zeros(val_shape)
+        fine_val = torch.ones(val_shape)
         c[fine_key] = fine_val
 
         color_key = 'grid_color'
@@ -246,7 +254,7 @@ class NICE_SLAM():
 
         self.shared_c = c
 
-    def tracking(self, rank):
+    def tracking(self, rank, wandb_q):
         """
         Tracking Thread.
 
@@ -260,9 +268,9 @@ class NICE_SLAM():
                 break
             time.sleep(1)
 
-        self.tracker.run()
+        self.tracker.run(wandb_q)
 
-    def mapping(self, rank):
+    def mapping(self, rank, wandb_q):
         """
         Mapping Thread. (updates middle, fine, and color level)
 
@@ -270,9 +278,9 @@ class NICE_SLAM():
             rank (int): Thread ID.
         """
 
-        self.mapper.run()
+        self.mapper.run(wandb_q)
 
-    def coarse_mapping(self, rank):
+    def coarse_mapping(self, rank, wandb_q):
         """
         Coarse mapping Thread. (updates coarse level)
 
@@ -280,7 +288,7 @@ class NICE_SLAM():
             rank (int): Thread ID.
         """
 
-        self.coarse_mapper.run()
+        self.coarse_mapper.run(wandb_q)
 
     def run(self):
         """
@@ -288,14 +296,15 @@ class NICE_SLAM():
         """
 
         processes = []
+        wandb_q = mp.Queue()
         for rank in range(3):
             if rank == 0:
-                p = mp.Process(target=self.tracking, args=(rank, ))
+                p = mp.Process(target=self.tracking, args=(rank, wandb_q, ))
             elif rank == 1:
-                p = mp.Process(target=self.mapping, args=(rank, ))
+                p = mp.Process(target=self.mapping, args=(rank, wandb_q, ))
             elif rank == 2:
                 if self.coarse:
-                    p = mp.Process(target=self.coarse_mapping, args=(rank, ))
+                    p = mp.Process(target=self.coarse_mapping, args=(rank, wandb_q, ))
                 else:
                     continue
             p.start()

@@ -219,8 +219,12 @@ def raw2outputs_nerf_color(raw, z_vals, rays_d, occupancy=False, device='cuda:0'
         weights (tensor, N_rays*N_samples): weights assigned to each sampled color.
     """
 
-    def raw2alpha(raw, dists, act_fn=F.relu): return 1. - \
-        torch.exp(-act_fn(raw)*dists)
+    def raw2alpha(raw, dists, act_fn=F.relu):
+        # return 1. - torch.exp(-act_fn(raw)*dists)
+        # return 1. - torch.exp(-act_fn(10 * raw))
+        return 1. - torch.exp(-F.softplus(20 * raw))
+        # return 1. - torch.exp(-F.softplus(raw) * dists * 10)
+
     dists = z_vals[..., 1:] - z_vals[..., :-1]
     dists = dists.float()
     dists = torch.cat([dists, torch.Tensor([1e10]).float().to(
@@ -238,11 +242,15 @@ def raw2outputs_nerf_color(raw, z_vals, rays_d, occupancy=False, device='cuda:0'
 
     weights = alpha.float() * torch.cumprod(torch.cat([torch.ones((alpha.shape[0], 1)).to(
         device).float(), (1.-alpha + 1e-10).float()], -1).float(), -1)[:, :-1]
+
+    prob = weights / weights.sum(-1, keepdim=True)
+    entr = (- torch.log(prob + 1e-12) * prob).sum(-1)
+    
     rgb_map = torch.sum(weights[..., None] * rgb, -2)  # (N_rays, 3)
     depth_map = torch.sum(weights * z_vals, -1)  # (N_rays)
     tmp = (z_vals-depth_map.unsqueeze(-1))  # (N_rays, N_samples)
     depth_var = torch.sum(weights*tmp*tmp, dim=1)  # (N_rays)
-    return depth_map, depth_var, rgb_map, weights
+    return depth_map, depth_var, rgb_map, weights, entr
 
 
 def get_rays(H, W, fx, fy, cx, cy, c2w, device):

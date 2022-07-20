@@ -176,7 +176,7 @@ class Renderer(object):
         raw = self.eval_points(pointsf, decoders, c, stage, device)
         raw = raw.reshape(N_rays, N_samples+N_surface, -1)
 
-        depth, uncertainty, color, weights = raw2outputs_nerf_color(
+        depth, uncertainty, color, weights, entr = raw2outputs_nerf_color(
             raw, z_vals, rays_d, occupancy=self.occupancy, device=device)
         if N_importance > 0:
             z_vals_mid = .5 * (z_vals[..., 1:] + z_vals[..., :-1])
@@ -195,7 +195,7 @@ class Renderer(object):
                 raw, z_vals, rays_d, occupancy=self.occupancy, device=device)
             return depth, uncertainty, color
 
-        return depth, uncertainty, color
+        return depth, uncertainty, color, entr
 
     def render_img(self, c, decoders, c2w, device, stage, gt_depth=None):
         """
@@ -240,7 +240,7 @@ class Renderer(object):
                     ret = self.render_batch_ray(
                         c, decoders, rays_d_batch, rays_o_batch, device, stage, gt_depth=gt_depth_batch)
 
-                depth, uncertainty, color = ret
+                depth, uncertainty, color, _ = ret
                 depth_list.append(depth.double())
                 uncertainty_list.append(uncertainty.double())
                 color_list.append(color)

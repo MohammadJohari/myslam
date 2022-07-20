@@ -14,6 +14,7 @@ from src.common import (get_camera_from_tensor, get_samples,
 from src.utils.datasets import get_dataset
 from src.utils.Visualizer import Visualizer
 
+import wandb
 
 class Tracker(object):
     def __init__(self, cfg, args, slam
@@ -105,7 +106,7 @@ class Tracker(object):
 
         ret = self.renderer.render_batch_ray(
             self.c, self.decoders, batch_rays_d, batch_rays_o,  self.device, stage='color',  gt_depth=batch_gt_depth)
-        depth, uncertainty, color = ret
+        depth, uncertainty, color, _ = ret
 
         uncertainty = uncertainty.detach()
         if self.handle_dynamic:
@@ -141,13 +142,17 @@ class Tracker(object):
                 self.c[key] = val
             self.prev_mapping_idx = self.mapping_idx[0].clone()
 
-    def run(self):
+    def run(self, wandb_q):
         device = self.device
         self.c = {}
         if self.verbose:
             pbar = self.frame_loader
         else:
             pbar = tqdm(self.frame_loader)
+
+        wandb_dir = self.cfg['data']['output']
+        wandb_name = wandb_dir.split('/')[-1]
+        wandb.init(config=self.cfg, name=wandb_name, dir=wandb_dir)
 
         for idx, gt_color, gt_depth, gt_c2w in pbar:
             if not self.verbose:
@@ -173,7 +178,9 @@ class Tracker(object):
             elif self.sync_method == 'free':
                 # pure parallel, if mesh/vis happens may cause inbalance
                 pass
-
+                        
+            start_time = time.time()
+            
             self.update_para_from_mapping()
 
             if self.verbose:
@@ -185,7 +192,7 @@ class Tracker(object):
                 c2w = gt_c2w
                 if not self.no_vis_on_first_frame:
                     self.visualizer.vis(
-                        idx, 0, gt_depth, gt_color, c2w, self.c, self.decoders)
+                        idx, 0, gt_depth, gt_color, c2w, self.c, self.decoders, wandb_q)
 
             else:
                 gt_camera_tensor = get_tensor_from_camera(gt_c2w)
@@ -227,7 +234,7 @@ class Tracker(object):
                         camera_tensor = torch.cat([quad, T], 0).to(self.device)
 
                     self.visualizer.vis(
-                        idx, cam_iter, gt_depth, gt_color, camera_tensor, self.c, self.decoders)
+                        idx, cam_iter, gt_depth, gt_color, camera_tensor, self.c, self.decoders, wandb_q)
 
                     loss = self.optimize_cam_in_batch(
                         camera_tensor, gt_color, gt_depth, self.tracking_pixels, optimizer_camera)
@@ -242,6 +249,15 @@ class Tracker(object):
                             print(
                                 f'Re-rendering loss: {initial_loss:.2f}->{loss:.2f} ' +
                                 f'camera tensor error: {initial_loss_camera_tensor:.4f}->{loss_camera_tensor:.4f}')
+
+
+                            wandb_q.put(({"Tracking Loss (Before)": initial_loss, "Tracking Loss (After)": loss}, idx))
+                            wandb_q.put(({
+                                "Tracking Error (Before)": initial_loss_camera_tensor,
+                                "Tracking Error (After)": loss_camera_tensor,
+                                "Tracking Error (Diff)": initial_loss_camera_tensor - loss_camera_tensor
+                                }, idx))
+
                     if loss < current_min_loss:
                         current_min_loss = loss
                         candidate_cam_tensor = camera_tensor.clone().detach()
@@ -254,5 +270,13 @@ class Tracker(object):
             self.gt_c2w_list[idx] = gt_c2w.clone().cpu()
             pre_c2w = c2w.clone()
             self.idx[0] = idx
+
+            print("---Tracking Time: %s seconds ---" % (time.time() - start_time))
+
+            while not wandb_q.empty():
+                wandb_val, wandb_idx = wandb_q.get()
+                wandb.log(wandb_val, wandb_idx)
+
             if self.low_gpu_mem:
                 torch.cuda.empty_cache()
+        wandb.finish()

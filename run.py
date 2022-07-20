@@ -7,7 +7,6 @@ import torch
 from src import config
 from src.NICE_SLAM import NICE_SLAM
 
-
 def setup_seed(seed):
     torch.manual_seed(seed)
     torch.cuda.manual_seed_all(seed)
@@ -35,11 +34,10 @@ def main():
 
     cfg = config.load_config(
         args.config, 'configs/nice_slam.yaml' if args.nice else 'configs/imap.yaml')
-
+    
     slam = NICE_SLAM(cfg, args)
 
     slam.run()
-
 
 if __name__ == '__main__':
     main()

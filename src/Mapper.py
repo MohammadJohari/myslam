@@ -12,6 +12,7 @@ from src.common import (get_camera_from_tensor, get_samples,
 from src.utils.datasets import get_dataset
 from src.utils.Visualizer import Visualizer
 
+import torch.nn.functional as F
 
 class Mapper(object):
     """
@@ -227,7 +228,7 @@ class Mapper(object):
             np.array(selected_keyframe_list))[:k])
         return selected_keyframe_list
 
-    def optimize_map(self, num_joint_iters, lr_factor, idx, cur_gt_color, cur_gt_depth, gt_cur_c2w, keyframe_dict, keyframe_list, cur_c2w):
+    def optimize_map(self, num_joint_iters, lr_factor, idx, cur_gt_color, cur_gt_depth, gt_cur_c2w, keyframe_dict, keyframe_list, cur_c2w, wandb_q):
         """
         Mapping iterations. Sample pixels from selected keyframes,
         then optimize scene representation and camera poses(if local BA enables).
@@ -425,7 +426,7 @@ class Mapper(object):
 
             if (not (idx == 0 and self.no_vis_on_first_frame)) and ('Demo' not in self.output):
                 self.visualizer.vis(
-                    idx, joint_iter, cur_gt_depth, cur_gt_color, cur_c2w, self.c, self.decoders)
+                    idx, joint_iter, cur_gt_depth, cur_gt_color, cur_c2w, self.c, self.decoders, wandb_q)
 
             optimizer.zero_grad()
             batch_rays_d_list = []
@@ -482,7 +483,7 @@ class Mapper(object):
             ret = self.renderer.render_batch_ray(c, self.decoders, batch_rays_d,
                                                  batch_rays_o, device, self.stage,
                                                  gt_depth=None if self.coarse_mapper else batch_gt_depth)
-            depth, uncertainty, color = ret
+            depth, uncertainty, color, entr = ret
 
             depth_mask = (batch_gt_depth > 0)
             loss = torch.abs(
@@ -493,12 +494,43 @@ class Mapper(object):
                 loss += weighted_color_loss
 
             # for imap*, it use volume density
-            regulation = (not self.occupancy)
+            # regulation = (not self.occupancy)
+            regulation = False
             if regulation:
                 point_sigma = self.renderer.regulation(
                     c, self.decoders, batch_rays_d, batch_rays_o, batch_gt_depth, device, self.stage)
-                regulation_loss = torch.abs(point_sigma).sum()
+                regulation_loss = torch.abs(1. - torch.exp(-F.softplus(20 * point_sigma))).sum()
+                print('loss: ', loss.item(), 'reg loss: ', regulation_loss.item())
                 loss += 0.0005*regulation_loss
+
+            # if idx == self.n_img - 1:
+            #     print('stage: ', self.stage)
+            #     for key, val in c.items():
+            #         if (self.coarse_mapper and 'coarse' in key) or \
+            #                 ((not self.coarse_mapper) and ('coarse' not in key) and ('color' not in key)):
+            #             print(key, val.shape)
+            #             tv1 = torch.pow((val[..., 1:] - val[...,:-1]),2).sum()
+            #             tv2 = torch.pow((val[..., 1:, :] - val[...,:-1, :]),2).sum()
+            #             tv3 = torch.pow((val[..., 1:, :, :] - val[...,:-1, :, :]),2).sum()
+            #             tv_loss = tv1 + tv2 + tv3
+            #             print('tv loss: ', tv_loss.item())
+                                
+            # regulation_loss = entr.mean()
+            # print('loss: ', loss.item(), 'reg loss: ', regulation_loss.item())
+            # loss += 5 * regulation_loss
+
+            # for key, val in c.items():
+            #     if (self.coarse_mapper and 'coarse' in key) or \
+            #             ((not self.coarse_mapper) and ('coarse' not in key) and ('color' not in key)):
+            #         # print(key, val.shape)
+            #         tv1 = torch.pow((val[..., 1:] - val[...,:-1]),2).mean()
+            #         tv2 = torch.pow((val[..., 1:, :] - val[...,:-1, :]),2).mean()
+            #         tv3 = torch.pow((val[..., 1:, :, :] - val[...,:-1, :, :]),2).mean()
+            #         tv_loss = tv1 + tv2 + tv3
+            #         # print('loss: ', loss, 'tv loss: ', tv_loss.item())
+            #         loss += 0.01 * tv_loss
+
+
 
             loss.backward(retain_graph=False)
             optimizer.step()
@@ -539,7 +571,7 @@ class Mapper(object):
         else:
             return None
 
-    def run(self):
+    def run(self, wandb_q):
         cfg = self.cfg
         idx, gt_color, gt_depth, gt_c2w = self.frame_reader[0]
 
@@ -562,6 +594,8 @@ class Mapper(object):
                     break
                 time.sleep(0.1)
             prev_idx = idx
+
+            start_time = time.time()
 
             if self.verbose:
                 print(Fore.GREEN)
@@ -603,7 +637,7 @@ class Mapper(object):
                     not self.coarse_mapper)
 
                 _ = self.optimize_map(num_joint_iters, lr_factor, idx, gt_color, gt_depth,
-                                      gt_c2w, self.keyframe_dict, self.keyframe_list, cur_c2w=cur_c2w)
+                                      gt_c2w, self.keyframe_dict, self.keyframe_list, cur_c2w=cur_c2w, wandb_q=wandb_q)
                 if self.BA:
                     cur_c2w = _
                     self.estimate_c2w_list[idx] = cur_c2w
@@ -615,6 +649,8 @@ class Mapper(object):
                         self.keyframe_list.append(idx)
                         self.keyframe_dict.append({'gt_c2w': gt_c2w.cpu(), 'idx': idx, 'color': gt_color.cpu(
                         ), 'depth': gt_depth.cpu(), 'est_c2w': cur_c2w.clone()})
+
+            print("---Mapping Time: %s seconds ---" % (time.time() - start_time))
 
             if self.low_gpu_mem:
                 torch.cuda.empty_cache()

@@ -22,7 +22,7 @@ class Visualizer(object):
         os.makedirs(f'{vis_dir}', exist_ok=True)
 
     def vis(self, idx, iter, gt_depth, gt_color, c2w_or_camera_tensor, c,
-            decoders):
+            decoders, wandb_q):
         """
         Visualization of depth, color images and save to file.
 
@@ -63,6 +63,12 @@ class Visualizer(object):
                 depth_residual[gt_depth_np == 0.0] = 0.0
                 color_residual = np.abs(gt_color_np - color_np)
                 color_residual[gt_depth_np == 0.0] = 0.0
+
+                wandb_q.put(({
+                    "Depth Error": depth_residual.mean(),
+                    "Color Error": color_residual.mean(),
+                    "Depth Uncertainty": uncertainty.detach().cpu().numpy().mean()
+                    }, None))
 
                 fig, axs = plt.subplots(2, 3)
                 fig.tight_layout()
