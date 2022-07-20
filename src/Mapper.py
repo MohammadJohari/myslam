@@ -100,9 +100,9 @@ class Mapper(object):
         sdf_mask = (~front_mask) * (~back_mask)
 
         fs_loss = torch.mean(torch.square(sdf[front_mask] - torch.ones_like(sdf[front_mask])))
-        sdf_loss = torch.mean(torch.square((z_vals + sdf * self.truncation)[sdf_mask] - gt_depth[sdf_mask]))
+        sdf_loss = torch.mean(torch.square((z_vals + sdf * self.truncation)[sdf_mask] - gt_depth[:, None].expand(z_vals.shape)[sdf_mask]))
 
-        print('fs: ', fs_loss, 'sdf: ', sdf_loss)
+        print('fs: ', fs_loss.item(), 'sdf: ', sdf_loss.item())
 
         return 10 * fs_loss + 6000 * sdf_loss
 
