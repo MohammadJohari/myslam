@@ -95,8 +95,8 @@ class Mapper(object):
     def sdf_loss(self, sdf, z_vals, gt_depth):
         print(sdf.shape, z_vals.shape, gt_depth.shape)
 
-        front_mask = torch.where(z_vals < (gt_depth - self.truncation), torch.ones_like(z_vals), torch.zeros_like(z_vals))
-        back_mask = torch.where(z_vals > (gt_depth + self.truncation), torch.ones_like(z_vals), torch.zeros_like(z_vals))
+        front_mask = torch.where(z_vals < (gt_depth[:, None] - self.truncation), torch.ones_like(z_vals), torch.zeros_like(z_vals))
+        back_mask = torch.where(z_vals > (gt_depth[:, None] + self.truncation), torch.ones_like(z_vals), torch.zeros_like(z_vals))
         sdf_mask = (1.0 - front_mask) * (1.0 - back_mask)
 
         fs_loss = sdf[front_mask] - torch.ones_like(sdf[front_mask])
