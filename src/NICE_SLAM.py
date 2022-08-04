@@ -89,7 +89,7 @@ class NICE_SLAM():
         self.shared_decoders.share_memory()
         
         ## New params
-        self.truncation = 0.05
+        self.truncation = 0.04
 
         self.renderer = Renderer(cfg, args, self)
         self.mesher = Mesher(cfg, args, self)
@@ -167,30 +167,30 @@ class NICE_SLAM():
             cfg (dict): parsed config dict
         """
 
-        if self.coarse:
-            ckpt = torch.load(cfg['pretrained_decoders']['coarse'],
-                              map_location=cfg['mapping']['device'])
-            coarse_dict = {}
-            for key, val in ckpt['model'].items():
-                if ('decoder' in key) and ('encoder' not in key):
-                    key = key[8:]
-                    coarse_dict[key] = val
-            self.shared_decoders.coarse_decoder.load_state_dict(coarse_dict)
+        # if self.coarse:
+        #     ckpt = torch.load(cfg['pretrained_decoders']['coarse'],
+        #                       map_location=cfg['mapping']['device'])
+        #     coarse_dict = {}
+        #     for key, val in ckpt['model'].items():
+        #         if ('decoder' in key) and ('encoder' not in key):
+        #             key = key[8:]
+        #             coarse_dict[key] = val
+        #     self.shared_decoders.coarse_decoder.load_state_dict(coarse_dict)
 
-        ckpt = torch.load(cfg['pretrained_decoders']['middle_fine'],
-                          map_location=cfg['mapping']['device'])
-        middle_dict = {}
-        fine_dict = {}
-        for key, val in ckpt['model'].items():
-            if ('decoder' in key) and ('encoder' not in key):
-                if 'coarse' in key:
-                    key = key[8+7:]
-                    middle_dict[key] = val
-                elif 'fine' in key:
-                    key = key[8+5:]
-                    fine_dict[key] = val
-        self.shared_decoders.middle_decoder.load_state_dict(middle_dict)
-        self.shared_decoders.fine_decoder.load_state_dict(fine_dict)
+        # ckpt = torch.load(cfg['pretrained_decoders']['middle_fine'],
+        #                   map_location=cfg['mapping']['device'])
+        # middle_dict = {}
+        # fine_dict = {}
+        # for key, val in ckpt['model'].items():
+        #     if ('decoder' in key) and ('encoder' not in key):
+        #         if 'coarse' in key:
+        #             key = key[8+7:]
+        #             middle_dict[key] = val
+        #         elif 'fine' in key:
+        #             key = key[8+5:]
+        #             fine_dict[key] = val
+        # self.shared_decoders.middle_decoder.load_state_dict(middle_dict)
+        # self.shared_decoders.fine_decoder.load_state_dict(fine_dict)
 
     def grid_init(self, cfg):
         """
@@ -230,9 +230,10 @@ class NICE_SLAM():
         self.middle_val_shape = middle_val_shape
         val_shape = [1, o_dim, *middle_val_shape]
         # middle_val = torch.zeros(val_shape).normal_(mean=0, std=0.01)
-        # middle_val = torch.zeros(val_shape).normal_(mean=0, std=0.01).abs()
-        middle_val = torch.ones(val_shape)
+        middle_val = -0.5 * torch.ones(val_shape)
+        
         c[middle_key] = middle_val
+        print('middle:', val_shape)
 
         fine_key = 'grid_fine'
         fine_val_shape = list(map(int, (xyz_len/fine_grid_len).tolist()))
@@ -242,6 +243,7 @@ class NICE_SLAM():
         # fine_val = torch.zeros(val_shape).normal_(mean=0, std=0.0001)
         fine_val = torch.zeros(val_shape)
         c[fine_key] = fine_val
+        print('fine:', val_shape)
 
         color_key = 'grid_color'
         color_val_shape = list(map(int, (xyz_len/color_grid_len).tolist()))

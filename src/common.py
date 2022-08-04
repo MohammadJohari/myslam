@@ -235,8 +235,6 @@ def raw2outputs_nerf_color(raw, z_vals, rays_d, truncation, occupancy=False, dev
         z_min = torch.gather(z_vals, 1, inds) # The first surface
         mask = torch.where(z_vals < z_min + truncation, torch.ones_like(z_vals), torch.zeros_like(z_vals))
 
-        print('z mean:' , z_vals.mean().item(), 'z min:' , z_vals.min().item(), 'zmin:' , z_min.mean().item())
-
         weights = weights * mask
         return weights / (torch.sum(weights, axis=-1, keepdims=True) + 1e-8)
 

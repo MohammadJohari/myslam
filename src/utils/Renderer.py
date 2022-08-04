@@ -132,9 +132,13 @@ class Renderer(object):
                 t_vals_surface = torch.linspace(
                     0., 1., steps=N_surface).double().to(device)
                 # emperical range 0.05*depth
-                z_vals_surface_depth_none_zero = 0.95*gt_depth_surface * \
-                    (1.-t_vals_surface) + 1.05 * \
-                    gt_depth_surface * (t_vals_surface)
+                # z_vals_surface_depth_none_zero = 0.95*gt_depth_surface * \
+                #     (1.-t_vals_surface) + 1.05 * \
+                #     gt_depth_surface * (t_vals_surface)
+
+                z_vals_surface_depth_none_zero = gt_depth_surface - 0.04 * (1.-t_vals_surface) + 0.04 * t_vals_surface
+
+
                 z_vals_surface = torch.zeros(
                     gt_depth.shape[0], N_surface).to(device).double()
                 gt_none_zero_mask = gt_none_zero_mask.squeeze(-1)

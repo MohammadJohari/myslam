@@ -70,6 +70,24 @@ class Tracker(object):
                                      renderer=self.renderer, truncation=self.truncation, verbose=self.verbose, device=self.device)
         self.H, self.W, self.fx, self.fy, self.cx, self.cy = slam.H, slam.W, slam.fx, slam.fy, slam.cx, slam.cy
 
+    def sdf_loss(self, sdf, z_vals, gt_depth):
+        front_mask = torch.where(z_vals < (gt_depth[:, None] - self.truncation), torch.ones_like(z_vals), torch.zeros_like(z_vals)).bool()
+        back_mask = torch.where(z_vals > (gt_depth[:, None] + self.truncation), torch.ones_like(z_vals), torch.zeros_like(z_vals)).bool()
+        sdf_mask = (~front_mask) * (~back_mask)
+
+        fs_loss = torch.square(sdf[front_mask] - torch.ones_like(sdf[front_mask]))
+        sdf_loss = torch.square((z_vals + sdf * self.truncation)[sdf_mask] - gt_depth[:, None].expand(z_vals.shape)[sdf_mask])
+
+        # tmp1 = fs_loss < 10 * fs_loss.median()
+        # tmp2 = sdf_loss < 10 * sdf_loss.median()
+
+        # loss = 10 * fs_loss[tmp1].mean() + 200 * sdf_loss[tmp2].mean()
+        
+        # loss = 10 * fs_loss.mean() + 200 * sdf_loss.mean()
+        loss = 10 * fs_loss.mean() + 200 * sdf_loss.mean()
+
+        return loss
+
     def optimize_cam_in_batch(self, camera_tensor, gt_color, gt_depth, batch_size, optimizer):
         """
         Do one iteration of camera iteration. Sample pixels, render depth/color, calculate loss and backpropagation.
@@ -106,8 +124,8 @@ class Tracker(object):
             batch_gt_color = batch_gt_color[inside_mask]
 
         ret = self.renderer.render_batch_ray(
-            self.c, self.decoders, batch_rays_d, batch_rays_o,  self.device, stage='color',  gt_depth=batch_gt_depth)
-        depth, uncertainty, color, _, _, _ = ret
+            self.c, self.decoders, batch_rays_d, batch_rays_o,  self.device, stage='color', truncation=self.truncation, gt_depth=batch_gt_depth)
+        depth, uncertainty, color, _, sdf, z_vals = ret
 
         uncertainty = uncertainty.detach()
         if self.handle_dynamic:
@@ -116,13 +134,20 @@ class Tracker(object):
         else:
             mask = batch_gt_depth > 0
 
-        loss = (torch.abs(batch_gt_depth-depth) /
-                torch.sqrt(uncertainty+1e-10))[mask].sum()
+        # loss = (torch.abs(batch_gt_depth-depth) /
+        #         torch.sqrt(uncertainty+1e-10))[mask].sum()
 
-        if self.use_color_in_tracking:
-            color_loss = torch.abs(
-                batch_gt_color - color)[mask].sum()
-            loss += self.w_color_loss*color_loss
+        # loss = self.sdf_loss(sdf[mask], z_vals[mask], batch_gt_depth[mask])
+
+        # depth_mask = batch_gt_depth > 0
+        good_mask = torch.abs(batch_gt_depth - depth) < 0.12
+        depth_mask = (batch_gt_depth > 0) & good_mask
+        loss = self.sdf_loss(sdf[depth_mask], z_vals[depth_mask], batch_gt_depth[depth_mask])
+
+        # if self.use_color_in_tracking:
+        #     color_loss = torch.square(
+        #         batch_gt_color - color)[good_mask].mean()
+        #     loss += self.w_color_loss*color_loss
 
         loss.backward()
         optimizer.step()

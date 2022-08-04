@@ -309,7 +309,8 @@ class Mesher(object):
             if len(ret.shape) == 1 and ret.shape[0] == 4:
                 ret = ret.unsqueeze(0)
 
-            ret[~mask, 3] = 100
+            # ret[~mask, 3] = 100
+            ret[~mask, 3] = -1
             rets.append(ret)
 
         ret = torch.cat(rets, dim=0)
@@ -427,7 +428,8 @@ class Mesher(object):
                                               device).cpu().numpy()[:, -1])
 
                 z = np.concatenate(z, axis=0)
-                z[~mask] = 100
+                # z[~mask] = 100
+                z[~mask] = -1
 
             z = z.astype(np.float32)
 

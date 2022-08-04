@@ -10,17 +10,17 @@ tracking:
   const_speed_assumption: True
   lr: 0.001
   pixels: 200
-  iters: 10
+  iters: 20
 mapping:
   every_frame: 5
-  vis_freq: 10
-  vis_inside_freq: 30
-  mesh_freq: 10
+  vis_freq: 50
+  vis_inside_freq: 50
+  mesh_freq: 50
   ckpt_freq: 500
   keyframe_every: 50
   mapping_window_size: 5
-  pixels: 1000
-  iters_first: 1500
+  pixels: 8000
+  iters_first: 150
   iters: 60
 cam:
   H: 680

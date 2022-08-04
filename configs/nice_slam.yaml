@@ -6,16 +6,16 @@ occupancy: False
 low_gpu_mem: True
 grid_len:
   coarse: 2 
-  middle: 0.32 
-  fine: 0.16
-  color: 0.16
-  bound_divisable: 0.32
+  middle: 0.08 
+  fine: 0.03
+  color: 0.04
+  bound_divisable: 0.08
 pretrained_decoders:
   coarse: pretrained/coarse.pt
   middle_fine: pretrained/middle_fine.pt # one ckpt contain both middle and fine
 meshing:
   level_set: 0
-  resolution: 256 # change to 512 for higher resolution geometry
+  resolution: 512 # change to 512 for higher resolution geometry
   eval_rec: False
   clean_mesh: True
   depth_test: False
@@ -27,12 +27,12 @@ meshing:
 tracking:
   ignore_edge_W: 20
   ignore_edge_H: 20
-  use_color_in_tracking: True
+  use_color_in_tracking: False
   device: "cuda:0"
   handle_dynamic: True
   vis_freq: 50
   vis_inside_freq: 25
-  w_color_loss: 0.5
+  w_color_loss: 0.03
   seperate_LR: False
   const_speed_assumption: True
   no_vis_on_first_frame: True
@@ -59,8 +59,8 @@ mapping:
   ckpt_freq: 500
   keyframe_every: 50
   mapping_window_size: 5
-  w_color_loss: 0.2
-  frustum_feature_selection: True
+  w_color_loss: 0.01
+  frustum_feature_selection: False
   keyframe_selection_method: 'overlap'
   save_selected_keyframes_info: False
   lr_first_factor: 5
@@ -103,7 +103,7 @@ cam:
   png_depth_scale: 6553.5 #for depth image in png format
   crop_edge: 0
 rendering:
-  N_samples: 32
+  N_samples: 64
   N_surface: 16
   N_importance: 0
   lindisp: False
@@ -111,6 +111,6 @@ rendering:
 data:
   dim: 3
 model:
-  c_dim: 32
+  c_dim: 16
   coarse_bound_enlarge: 2
   pos_embedding_method: fourier

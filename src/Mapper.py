@@ -14,6 +14,8 @@ from src.utils.Visualizer import Visualizer
 
 import torch.nn.functional as F
 
+from torch.optim import Adam
+
 class Mapper(object):
     """
     Mapper thread. Note that coarse mapper also uses this code.
@@ -100,9 +102,7 @@ class Mapper(object):
         fs_loss = torch.mean(torch.square(sdf[front_mask] - torch.ones_like(sdf[front_mask])))
         sdf_loss = torch.mean(torch.square((z_vals + sdf * self.truncation)[sdf_mask] - gt_depth[:, None].expand(z_vals.shape)[sdf_mask]))
 
-        print('fs: ', fs_loss.item(), 'sdf: ', sdf_loss.item())
-
-        return 10 * fs_loss + 6000 * sdf_loss
+        return 10 * fs_loss + 100 * sdf_loss
 
     def get_mask_from_c2w(self, c2w, key, val_shape, depth_np):
         """
@@ -118,10 +118,11 @@ class Mapper(object):
             mask (tensor): mask for selected optimizable feature.
             points (tensor): corresponding point coordinates.
         """
+        scale = 1
         H, W, fx, fy, cx, cy, = self.H, self.W, self.fx, self.fy, self.cx, self.cy
-        X, Y, Z = torch.meshgrid(torch.linspace(self.bound[0][0], self.bound[0][1], val_shape[2]),
-                                 torch.linspace(self.bound[1][0], self.bound[1][1], val_shape[1]),
-                                 torch.linspace(self.bound[2][0], self.bound[2][1], val_shape[0]))
+        X, Y, Z = torch.meshgrid(torch.linspace(self.bound[0][0], self.bound[0][1], val_shape[2] // scale),
+                                 torch.linspace(self.bound[1][0], self.bound[1][1], val_shape[1] // scale),
+                                 torch.linspace(self.bound[2][0], self.bound[2][1], val_shape[0] // scale))
 
         points = torch.stack([X, Y, Z], dim=-1).reshape(-1, 3)
         if key == 'grid_coarse':
@@ -174,7 +175,11 @@ class Mapper(object):
         mask = mask | mask2
 
         points = points[mask]
-        mask = mask.reshape(val_shape[2], val_shape[1], val_shape[0])
+
+        mask = mask.reshape(val_shape[2] // scale, val_shape[1] // scale, val_shape[0] // scale)
+        mask = F.interpolate(torch.from_numpy(mask).float()[None][None], size=[val_shape[2], val_shape[1], val_shape[0]],
+                mode='nearest', align_corners=None, antialias=False)[0, 0].numpy() > 0
+
         return mask
 
     def keyframe_selection_overlap(self, gt_color, gt_depth, c2w, keyframe_dict, k, N_samples=16, pixels=100):
@@ -308,6 +313,9 @@ class Mapper(object):
         fine_grid_para = []
         color_grid_para = []
         gt_depth_np = cur_gt_depth.cpu().numpy()
+
+        iter_time = time.time()
+
         if self.nice:
             if self.frustum_feature_selection:
                 masked_c_grad = {}
@@ -357,6 +365,9 @@ class Mapper(object):
             # imap*, single MLP
             decoders_para_list += list(self.decoders.parameters())
 
+        # print("******************************************")
+        # print("---After mask: %s seconds ---" % (time.time() - iter_time))
+
         if self.BA:
             camera_tensor_list = []
             gt_camera_tensor_list = []
@@ -379,18 +390,18 @@ class Mapper(object):
         if self.nice:
             if self.BA:
                 # The corresponding lr will be set according to which stage the optimization is in
-                optimizer = torch.optim.Adam([{'params': decoders_para_list, 'lr': 0},
+                optimizer = Adam([{'params': decoders_para_list, 'lr': 0},
                                               {'params': coarse_grid_para, 'lr': 0},
                                               {'params': middle_grid_para, 'lr': 0},
                                               {'params': fine_grid_para, 'lr': 0},
                                               {'params': color_grid_para, 'lr': 0},
                                               {'params': camera_tensor_list, 'lr': 0}])
             else:
-                optimizer = torch.optim.Adam([{'params': decoders_para_list, 'lr': 0},
+                optimizer = Adam([{'params': decoders_para_list, 'lr': 0},
                                               {'params': coarse_grid_para, 'lr': 0},
                                               {'params': middle_grid_para, 'lr': 0},
                                               {'params': fine_grid_para, 'lr': 0},
-                                              {'params': color_grid_para, 'lr': 0}])
+                                              {'params': color_grid_para, 'lr': 0}], betas=(0.9, 0.999))
         else:
             # imap*, single MLP
             if self.BA:
@@ -402,7 +413,9 @@ class Mapper(object):
             from torch.optim.lr_scheduler import StepLR
             scheduler = StepLR(optimizer, step_size=200, gamma=0.8)
 
+
         for joint_iter in range(num_joint_iters):
+            # print("---Before joint: %s seconds ---" % (time.time() - iter_time))
             if self.nice:
                 if self.frustum_feature_selection:
                     for key, val in c.items():
@@ -413,6 +426,8 @@ class Mapper(object):
                             val = val.to(device)
                             val[mask] = val_grad
                             c[key] = val
+
+                # print("---After assignment: %s seconds ---" % (time.time() - iter_time))
 
                 if self.coarse_mapper:
                     self.stage = 'coarse'
@@ -509,6 +524,10 @@ class Mapper(object):
             ##############################################
 
             loss = self.sdf_loss(sdf[depth_mask], z_vals[depth_mask], batch_gt_depth[depth_mask])
+            # if ((not self.nice) or (self.stage == 'color')):
+            #     color_loss = torch.square(batch_gt_color - color).mean()
+            #     weighted_color_loss = self.w_color_loss*color_loss
+            #     loss += weighted_color_loss
 
             # for imap*, it use volume density
             # regulation = (not self.occupancy)

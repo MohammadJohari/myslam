@@ -573,21 +573,28 @@ class MyNICE(nn.Module):
             raw = torch.zeros(occ.shape[0], 4).to(device).float()
             raw[..., -1] = occ
             return raw
+        # elif stage == 'middle':
+        #     middle_occ = self.middle_decoder(p, c_grid)
+        #     raw = torch.zeros(middle_occ.shape[0], 4).to(device).float()
+        #     raw[..., -1] = middle_occ
+        #     return raw
         elif stage == 'middle':
+            fine_occ = self.fine_decoder(p, c_grid)
+            raw = torch.zeros(fine_occ.shape[0], 4).to(device).float()
             middle_occ = self.middle_decoder(p, c_grid)
-            raw = torch.zeros(middle_occ.shape[0], 4).to(device).float()
-            raw[..., -1] = middle_occ
+            raw[..., -1] = torch.tanh(fine_occ+middle_occ)
             return raw
         elif stage == 'fine':
             fine_occ = self.fine_decoder(p, c_grid)
             raw = torch.zeros(fine_occ.shape[0], 4).to(device).float()
             middle_occ = self.middle_decoder(p, c_grid)
-            raw[..., -1] = fine_occ+middle_occ
+            raw[..., -1] = torch.tanh(fine_occ+middle_occ)
             return raw
         elif stage == 'color':
             fine_occ = self.fine_decoder(p, c_grid)
-            raw = self.color_decoder(p, c_grid)
+            # raw = self.color_decoder(p, c_grid)
+            raw = torch.zeros([p.shape[1], 4]).to(p.device)
             middle_occ = self.middle_decoder(p, c_grid)
             middle_occ = middle_occ
-            raw[..., -1] = fine_occ+middle_occ
+            raw[..., -1] = torch.tanh(fine_occ+middle_occ)
             return raw
