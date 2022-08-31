@@ -8,10 +8,11 @@ export CUDA_VISIBLE_DEVICES=0
 grid_gpu="-l sgpu -l h=vgn[ji]*"
 grid_args="${grid_gpu} -P ams -S $(which python3) -cwd -V"
 
-python_command="run.py configs/Replica/room0.yaml"
+python_command="run.py configs/Replica/office1.yaml"
+# python_command="run.py configs/Apartment/apartment.yaml"
 
 expname="o0_sigin"
-expname="e"$RANDOM
+expname="ex"$RANDOM
 
 if [ $(qstat | grep ${expname} -c) == 0 ]; then
   log_dir="grid_logs"

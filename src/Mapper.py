@@ -22,16 +22,23 @@ class Mapper(object):
 
     """
 
-    def __init__(self, cfg, args, slam, coarse_mapper=False
+    def __init__(self, cfg, args, slam, coarse_mapper=False, aux_mapper=False
                  ):
 
         self.cfg = cfg
         self.args = args
         self.coarse_mapper = coarse_mapper
+        self.aux_mapper = aux_mapper
 
         self.idx = slam.idx
         self.nice = slam.nice
-        self.c = slam.shared_c
+        if aux_mapper:
+            self.truncation = 2.5 * slam.truncation
+            self.c = slam.shared_c_aux
+        else:
+            self.truncation = slam.truncation
+            self.c = slam.shared_c
+            self.c_aux = slam.shared_c_aux
         self.bound = slam.bound
         self.logger = slam.logger
         self.mesher = slam.mesher
@@ -44,7 +51,6 @@ class Mapper(object):
         self.decoders = slam.shared_decoders
         self.estimate_c2w_list = slam.estimate_c2w_list
         self.mapping_first_frame = slam.mapping_first_frame
-        self.truncation = slam.truncation
 
         self.scale = cfg['scale']
         self.coarse = cfg['coarse']
@@ -94,15 +100,33 @@ class Mapper(object):
                                          truncation=self.truncation, verbose=self.verbose, device=self.device)
         self.H, self.W, self.fx, self.fy, self.cx, self.cy = slam.H, slam.W, slam.fx, slam.fy, slam.cx, slam.cy
 
+    # def sdf_loss(self, sdf, z_vals, gt_depth):
+    #     front_mask = torch.where(z_vals < (gt_depth[:, None] - self.truncation), torch.ones_like(z_vals), torch.zeros_like(z_vals)).bool()
+    #     back_mask = torch.where(z_vals > (gt_depth[:, None] + self.truncation), torch.ones_like(z_vals), torch.zeros_like(z_vals)).bool()
+    #     sdf_mask = (~front_mask) * (~back_mask)
+
+    #     fs_loss = torch.mean(torch.square(sdf[front_mask] - torch.ones_like(sdf[front_mask])))
+    #     # fs_loss = torch.mean(torch.abs(sdf[front_mask] - torch.ones_like(sdf[front_mask])))
+        
+    #     # side = 1 + 2 * (z_vals < gt_depth[:, None]).float()
+    #     side = 1
+    #     sdf_loss = torch.mean(torch.square((z_vals + sdf * side * self.truncation)[sdf_mask] - gt_depth[:, None].expand(z_vals.shape)[sdf_mask]))
+    #     # sdf_loss = torch.mean(torch.abs((z_vals + sdf * self.truncation)[sdf_mask] - gt_depth[:, None].expand(z_vals.shape)[sdf_mask]))
+
+    #     return 10 * fs_loss + 100 * sdf_loss
+
     def sdf_loss(self, sdf, z_vals, gt_depth):
         front_mask = torch.where(z_vals < (gt_depth[:, None] - self.truncation), torch.ones_like(z_vals), torch.zeros_like(z_vals)).bool()
-        back_mask = torch.where(z_vals > (gt_depth[:, None] + self.truncation), torch.ones_like(z_vals), torch.zeros_like(z_vals)).bool()
-        sdf_mask = (~front_mask) * (~back_mask)
+        back_mask = torch.where(z_vals > (gt_depth[:, None] + self.truncation), torch.ones_like(z_vals), torch.zeros_like(z_vals)).bool()        
+        center_mask = torch.where((z_vals > (gt_depth[:, None] - 0.4 * self.truncation)) * 
+                        (z_vals < (gt_depth[:, None] + 0.4 * self.truncation)), torch.ones_like(z_vals), torch.zeros_like(z_vals)).bool()
+        tail_mask = (~front_mask) * (~back_mask) * (~center_mask)
 
         fs_loss = torch.mean(torch.square(sdf[front_mask] - torch.ones_like(sdf[front_mask])))
-        sdf_loss = torch.mean(torch.square((z_vals + sdf * self.truncation)[sdf_mask] - gt_depth[:, None].expand(z_vals.shape)[sdf_mask]))
-
-        return 10 * fs_loss + 100 * sdf_loss
+        center_loss = torch.mean(torch.square((z_vals + sdf * self.truncation)[center_mask] - gt_depth[:, None].expand(z_vals.shape)[center_mask]))
+        tail_loss = torch.mean(torch.square((z_vals + sdf * self.truncation)[tail_mask] - gt_depth[:, None].expand(z_vals.shape)[tail_mask]))
+       
+        return 5 * fs_loss + 200 * center_loss + 10 * tail_loss
 
     def get_mask_from_c2w(self, c2w, key, val_shape, depth_np):
         """
@@ -452,7 +476,7 @@ class Mapper(object):
                 if self.BA:
                     optimizer.param_groups[1]['lr'] = self.BA_cam_lr
 
-            if (not (idx == 0 and self.no_vis_on_first_frame)) and ('Demo' not in self.output):
+            if (not (idx == 0 and self.no_vis_on_first_frame)) and ('Demo' not in self.output) and (not self.aux_mapper):
                 self.visualizer.vis(
                     idx, joint_iter, cur_gt_depth, cur_gt_color, cur_c2w, self.c, self.decoders, wandb_q)
 
@@ -524,10 +548,20 @@ class Mapper(object):
             ##############################################
 
             loss = self.sdf_loss(sdf[depth_mask], z_vals[depth_mask], batch_gt_depth[depth_mask])
+            # loss = loss + 0.1 * torch.mean(torch.square(sdf + 0.25 * torch.ones_like(sdf)))
+
+            ## Sepehr Color loss
             # if ((not self.nice) or (self.stage == 'color')):
+            #     # loss = loss + 0.0000001 * torch.mean(torch.square(sdf[~depth_mask] - torch.ones_like(sdf[~depth_mask])))
             #     color_loss = torch.square(batch_gt_color - color).mean()
-            #     weighted_color_loss = self.w_color_loss*color_loss
+            #     weighted_color_loss = 100 * self.w_color_loss*color_loss
             #     loss += weighted_color_loss
+
+            # regulation_loss = entr[~depth_mask].mean()
+            # regulation_loss = entr.mean()
+            # # print('loss: ', loss.item(), 'reg loss: ', regulation_loss.item())
+            # loss += 0.5 * regulation_loss
+
 
             # for imap*, it use volume density
             # regulation = (not self.occupancy)
@@ -619,6 +653,7 @@ class Mapper(object):
                 idx = self.idx[0].clone()
                 if idx == self.n_img-1:
                     break
+                
                 if self.sync_method == 'strict':
                     if idx % self.every_frame == 0 and idx != prev_idx:
                         break
@@ -628,6 +663,7 @@ class Mapper(object):
                         break
                 elif self.sync_method == 'free':
                     break
+                
                 time.sleep(0.1)
             prev_idx = idx
 
@@ -636,6 +672,7 @@ class Mapper(object):
             if self.verbose:
                 print(Fore.GREEN)
                 prefix = 'Coarse ' if self.coarse_mapper else ''
+                prefix = 'Auxiliary ' if self.aux_mapper else ''
                 print(prefix+"Mapping Frame ", idx.item())
                 print(Style.RESET_ALL)
 
@@ -670,7 +707,7 @@ class Mapper(object):
             for outer_joint_iter in range(outer_joint_iters):
 
                 self.BA = (len(self.keyframe_list) > 4) and cfg['mapping']['BA'] and (
-                    not self.coarse_mapper)
+                    not self.coarse_mapper) and (not self.aux_mapper)
 
                 _ = self.optimize_map(num_joint_iters, lr_factor, idx, gt_color, gt_depth,
                                       gt_c2w, self.keyframe_dict, self.keyframe_list, cur_c2w=cur_c2w, wandb_q=wandb_q)
@@ -686,16 +723,18 @@ class Mapper(object):
                         self.keyframe_dict.append({'gt_c2w': gt_c2w.cpu(), 'idx': idx, 'color': gt_color.cpu(
                         ), 'depth': gt_depth.cpu(), 'est_c2w': cur_c2w.clone()})
 
-            print("---Mapping Time: %s seconds ---" % (time.time() - start_time))
+            prefix = 'Auxiliary' if self.aux_mapper else ''
+            print("---%s Mapping Time: %s seconds ---" % (prefix, (time.time() - start_time)))
 
             if self.low_gpu_mem:
                 torch.cuda.empty_cache()
 
             init = False
-            # mapping of first frame is done, can begin tracking
-            self.mapping_first_frame[0] = 1
 
-            if not self.coarse_mapper:
+            if (not self.coarse_mapper) and (not self.aux_mapper):
+                # mapping of first frame is done, can begin tracking
+                self.mapping_first_frame[0] = 1
+
                 if ((not (idx == 0 and self.no_log_on_first_frame)) and idx % self.ckpt_freq == 0) \
                         or idx == self.n_img-1:
                     self.logger.log(idx, self.keyframe_dict, self.keyframe_list,

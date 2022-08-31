@@ -80,21 +80,29 @@ class NICE_SLAM():
         self.mapping_idx.share_memory_()
         self.mapping_cnt = torch.zeros((1)).int()  # counter for mapping
         self.mapping_cnt.share_memory_()
+        
         for key, val in self.shared_c.items():
             val = val.to(self.cfg['mapping']['device'])
             val.share_memory_()
             self.shared_c[key] = val
+
+        for key, val in self.shared_c_aux.items():
+            val = val.to(self.cfg['mapping']['device'])
+            val.share_memory_()
+            self.shared_c_aux[key] = val
+
         self.shared_decoders = self.shared_decoders.to(
             self.cfg['mapping']['device'])
         self.shared_decoders.share_memory()
         
         ## New params
-        self.truncation = 0.04
+        self.truncation = 0.10
 
         self.renderer = Renderer(cfg, args, self)
         self.mesher = Mesher(cfg, args, self)
         self.logger = Logger(cfg, args, self)
-        self.mapper = Mapper(cfg, args, self, coarse_mapper=False)
+        self.mapper = Mapper(cfg, args, self, coarse_mapper=False, aux_mapper=False)
+        self.aux_mapper = Mapper(cfg, args, self, coarse_mapper=False, aux_mapper=True)
         if self.coarse:
             self.coarse_mapper = Mapper(cfg, args, self, coarse_mapper=True)
         self.tracker = Tracker(cfg, args, self)
@@ -210,6 +218,7 @@ class NICE_SLAM():
         self.color_grid_len = color_grid_len
 
         c = {}
+        c_aux = {}
         c_dim = cfg['model']['c_dim']
         o_dim = 1
         xyz_len = self.bound[:, 1]-self.bound[:, 0]
@@ -233,7 +242,7 @@ class NICE_SLAM():
         middle_val = -0.5 * torch.ones(val_shape)
         
         c[middle_key] = middle_val
-        print('middle:', val_shape)
+        c_aux[middle_key] = middle_val.clone()
 
         fine_key = 'grid_fine'
         fine_val_shape = list(map(int, (xyz_len/fine_grid_len).tolist()))
@@ -243,8 +252,8 @@ class NICE_SLAM():
         # fine_val = torch.zeros(val_shape).normal_(mean=0, std=0.0001)
         fine_val = torch.zeros(val_shape)
         c[fine_key] = fine_val
-        print('fine:', val_shape)
-
+        c_aux[fine_key] = fine_val.clone()
+      
         color_key = 'grid_color'
         color_val_shape = list(map(int, (xyz_len/color_grid_len).tolist()))
         color_val_shape[0], color_val_shape[2] = color_val_shape[2], color_val_shape[0]
@@ -254,6 +263,7 @@ class NICE_SLAM():
         c[color_key] = color_val
 
         self.shared_c = c
+        self.shared_c_aux = c_aux
 
     def tracking(self, rank, wandb_q):
         """
@@ -291,6 +301,16 @@ class NICE_SLAM():
 
         self.coarse_mapper.run(wandb_q)
 
+    def aux_mapping(self, rank, wandb_q):
+        """
+        Auxiliary mapping Thread. (updates coarse level)
+
+        Args:
+            rank (int): Thread ID.
+        """
+
+        self.aux_mapper.run(wandb_q)
+
     def run(self):
         """
         Dispatch Threads.
@@ -298,8 +318,11 @@ class NICE_SLAM():
 
         processes = []
         wandb_q = mp.Queue()
-        for rank in range(3):
-            if rank == 0:
+        for rank in range(-1, 3):
+            if rank == -1:
+                continue
+                p = mp.Process(target=self.aux_mapping, args=(rank, wandb_q, ))
+            elif rank == 0:
                 p = mp.Process(target=self.tracking, args=(rank, wandb_q, ))
             elif rank == 1:
                 p = mp.Process(target=self.mapping, args=(rank, wandb_q, ))
@@ -307,7 +330,7 @@ class NICE_SLAM():
                 if self.coarse:
                     p = mp.Process(target=self.coarse_mapping, args=(rank, wandb_q, ))
                 else:
-                    continue
+                    continue            
             p.start()
             processes.append(p)
         for p in processes:

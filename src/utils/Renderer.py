@@ -136,7 +136,7 @@ class Renderer(object):
                 #     (1.-t_vals_surface) + 1.05 * \
                 #     gt_depth_surface * (t_vals_surface)
 
-                z_vals_surface_depth_none_zero = gt_depth_surface - 0.04 * (1.-t_vals_surface) + 0.04 * t_vals_surface
+                z_vals_surface_depth_none_zero = gt_depth_surface - 1 * truncation * (1.-t_vals_surface) + truncation * t_vals_surface
 
 
                 z_vals_surface = torch.zeros(

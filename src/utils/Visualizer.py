@@ -107,7 +107,7 @@ class Visualizer(object):
                 axs[1, 2].set_yticks([])
                 plt.subplots_adjust(wspace=0, hspace=0)
                 plt.savefig(
-                    f'{self.vis_dir}/{idx:05d}_{iter:04d}.jpg', bbox_inches='tight', pad_inches=0.2)
+                    f'{self.vis_dir}/{idx:05d}_{iter:04d}.jpg', bbox_inches='tight', pad_inches=0.2, dpi=300)
                 plt.clf()
 
                 if self.verbose:

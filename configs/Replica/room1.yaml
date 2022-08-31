@@ -4,4 +4,4 @@ mapping:
   marching_cubes_bound: [[-7.0,2.8],[-4.6,4.3],[-3.0,2.9]]
 data:
   input_folder: /idiap/resource/database/ETHZ-Replica/room1
-  output: /idiap/temp/mjohari/outputs/slam/Replica/r1_ncoa
+  output: /idiap/temp/mjohari/outputs/slam/Replica/r1_gt_c200_t20

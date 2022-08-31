@@ -226,7 +226,8 @@ def raw2outputs_nerf_color(raw, z_vals, rays_d, truncation, occupancy=False, dev
         # return 1. - torch.exp(-F.softplus(raw) * dists * 10)
 
     def sdf2weights(sdf, truncation, z_vals):
-        weights = torch.sigmoid(sdf / truncation) * torch.sigmoid(-sdf / truncation)
+        # weights = torch.sigmoid(sdf / truncation) * torch.sigmoid(-sdf / truncation)
+        weights = torch.sigmoid(10 * sdf) * torch.sigmoid(-10 * sdf)
 
         signs = sdf[:, 1:] * sdf[:, :-1]
         mask = torch.where(signs < 0.0, torch.ones_like(signs), torch.zeros_like(signs))

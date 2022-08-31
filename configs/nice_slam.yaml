@@ -3,12 +3,12 @@ sync_method: strict
 scale: 1
 verbose: True
 occupancy: False
-low_gpu_mem: True
+low_gpu_mem: False
 grid_len:
   coarse: 2 
-  middle: 0.08 
+  middle: 0.08
   fine: 0.03
-  color: 0.04
+  color: 0.16
   bound_divisable: 0.08
 pretrained_decoders:
   coarse: pretrained/coarse.pt
@@ -111,6 +111,6 @@ rendering:
 data:
   dim: 3
 model:
-  c_dim: 16
+  c_dim: 32
   coarse_bound_enlarge: 2
   pos_embedding_method: fourier

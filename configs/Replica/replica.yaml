@@ -20,7 +20,7 @@ mapping:
   keyframe_every: 50
   mapping_window_size: 5
   pixels: 8000
-  iters_first: 150
+  iters_first: 1500
   iters: 60
 cam:
   H: 680

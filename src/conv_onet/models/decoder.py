@@ -391,6 +391,104 @@ class MyMLP(nn.Module):
 
         return c.squeeze(-1)
 
+class MyMLP_mid(nn.Module):
+    """
+    Decoder. Point coordinates not only used in sampling the feature grids, but also as MLP input.
+
+    Args:
+        name (str): name of this decoder.
+        dim (int): input dimension.
+        c_dim (int): feature dimension.
+        hidden_size (int): hidden size of Decoder network.
+        n_blocks (int): number of layers.
+        leaky (bool): whether to use leaky ReLUs.
+        sample_mode (str): sampling feature strategy, bilinear|nearest.
+        color (bool): whether or not to output color.
+        skips (list): list of layers to have skip connections.
+        grid_len (float): voxel length of its corresponding feature grid.
+        pos_embedding_method (str): positional embedding method.
+        concat_feature (bool): whether to get feature from middle level and concat to the current feature.
+    """
+
+    def __init__(self, name='', dim=3, c_dim=128,
+                 hidden_size=256, n_blocks=5, leaky=False, sample_mode='bilinear',
+                 color=False, skips=[2], grid_len=0.16, pos_embedding_method='fourier', concat_feature=False):
+        super().__init__()
+        self.name = name
+        self.color = color
+        self.no_grad_feature = False
+        self.c_dim = c_dim
+        self.grid_len = grid_len
+        self.concat_feature = concat_feature
+        self.n_blocks = n_blocks
+        self.skips = skips
+
+        if c_dim != 0:
+            self.fc_c = nn.ModuleList([
+                nn.Linear(c_dim, hidden_size) for i in range(n_blocks)
+            ])
+
+        if pos_embedding_method == 'fourier':
+            embedding_size = 93
+            self.embedder = GaussianFourierFeatureTransform(
+                dim, mapping_size=embedding_size, scale=25)
+        elif pos_embedding_method == 'same':
+            embedding_size = 3
+            self.embedder = Same()
+        elif pos_embedding_method == 'nerf':
+            if 'color' in name:
+                multires = 10
+                self.embedder = Nerf_positional_embedding(
+                    multires, log_sampling=True)
+            else:
+                multires = 5
+                self.embedder = Nerf_positional_embedding(
+                    multires, log_sampling=False)
+            embedding_size = multires*6+3
+        elif pos_embedding_method == 'fc_relu':
+            embedding_size = 93
+            self.embedder = DenseLayer(dim, embedding_size, activation='relu')
+
+        self.pts_linears = nn.ModuleList(
+            [DenseLayer(embedding_size, hidden_size, activation="relu")] +
+            [DenseLayer(hidden_size, hidden_size, activation="relu") if i not in self.skips
+             else DenseLayer(hidden_size + embedding_size, hidden_size, activation="relu") for i in range(n_blocks-1)])
+
+        if self.color:
+            self.output_linear = DenseLayer(
+                hidden_size, 4, activation="linear")
+        else:
+            self.output_linear = DenseLayer(
+                hidden_size, 1, activation="linear")
+
+        if not leaky:
+            self.actvn = F.relu
+        else:
+            self.actvn = lambda x: F.leaky_relu(x, 0.2)
+
+        self.sample_mode = sample_mode
+
+    def sample_grid_feature(self, p, c):
+        p_nor = normalize_3d_coordinate(p.clone(), self.bound)
+        p_nor = p_nor.unsqueeze(0)
+        vgrid = p_nor[:, :, None, None].float()
+        # acutally trilinear interpolation if mode = 'bilinear'
+        c = F.grid_sample(c, vgrid, padding_mode='border', align_corners=True,
+                          mode=self.sample_mode).squeeze(-1).squeeze(-1)
+        return c
+
+    def forward(self, p, c_grid=None):
+        ups = F.interpolate(c_grid['grid_' + self.name],
+                scale_factor=0.5, mode='trilinear')
+
+        c = self.sample_grid_feature(
+            p, c_grid['grid_' + self.name]).transpose(1, 2).squeeze(0)
+        
+        c_ups = self.sample_grid_feature(
+            p, ups).transpose(1, 2).squeeze(0)
+
+        return c_ups.squeeze(-1)
+
 class MLP_no_xyz(nn.Module):
     """
     Decoder. Point coordinates only used in sampling the feature grids, not as MLP input.
