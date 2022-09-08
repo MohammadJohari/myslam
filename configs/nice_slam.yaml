@@ -3,19 +3,19 @@ sync_method: strict
 scale: 1
 verbose: True
 occupancy: False
-low_gpu_mem: False
+low_gpu_mem: True
 grid_len:
   coarse: 2 
-  middle: 0.08
-  fine: 0.03
+  middle: 0.24
+  fine: 0.08
   color: 0.16
-  bound_divisable: 0.08
+  bound_divisable: 0.24
 pretrained_decoders:
   coarse: pretrained/coarse.pt
   middle_fine: pretrained/middle_fine.pt # one ckpt contain both middle and fine
 meshing:
   level_set: 0
-  resolution: 512 # change to 512 for higher resolution geometry
+  resolution: 0.01 # change to 512 for higher resolution geometry
   eval_rec: False
   clean_mesh: True
   depth_test: False
@@ -36,7 +36,7 @@ tracking:
   seperate_LR: False
   const_speed_assumption: True
   no_vis_on_first_frame: True
-  gt_camera: False
+  gt_camera: True
   lr: 0.001
   pixels: 200
   iters: 10
@@ -76,21 +76,26 @@ mapping:
       fine_lr: 0.0
       color_lr: 0.0
     middle:
-      decoders_lr: 0.0
+      decoders_lr: 0.005
       coarse_lr: 0.0
+      # middle_lr: 0.1
       middle_lr: 0.1
       fine_lr: 0.0
       color_lr: 0.0
     fine:
-      decoders_lr: 0.0
+      decoders_lr: 0.005
       coarse_lr: 0.0
       middle_lr: 0.005
+      # middle_lr: 0.0
+      # fine_lr: 0.005
       fine_lr: 0.005
       color_lr: 0.0
     color:
       decoders_lr: 0.005
       coarse_lr: 0.0
       middle_lr: 0.005
+      # middle_lr: 0.0
+      # fine_lr: 0.005
       fine_lr: 0.005
       color_lr: 0.005
 cam:
@@ -107,7 +112,7 @@ rendering:
   N_surface: 16
   N_importance: 0
   lindisp: False
-  perturb: 0.0
+  perturb: 1.0
 data:
   dim: 3
 model:

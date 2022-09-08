@@ -75,6 +75,7 @@ class Mesher(object):
         seen_mask_list = []
         forecast_mask_list = []
         unseen_mask_list = []
+
         for i, pnts in enumerate(
                 torch.split(input_points, self.points_batch_size, dim=0)):
             points = pnts.to(device).float()
@@ -84,6 +85,7 @@ class Mesher(object):
             # unseen: all the other points
 
             seen_mask = torch.zeros((points.shape[0])).bool().to(device)
+            potential_occlusion_mask = torch.zeros((points.shape[0])).bool().to(device)
             forecast_mask = torch.zeros((points.shape[0])).bool().to(device)
             if get_mask_use_all_frames:
                 for i in range(0, idx + 1, 1):
@@ -121,8 +123,28 @@ class Mesher(object):
                     # seen
                     cur_mask_seen = cur_mask_seen.reshape(-1)
 
+                    if self.depth_test:
+                        _, _, gt_depth, _ = self.frame_reader[i]
+                        gt_depth = gt_depth.to(device).reshape(1, 1, H, W)
+                        vgrid = uv.reshape(1, 1, -1, 2)
+                        vgrid[..., 0] = vgrid[..., 0] / W
+                        vgrid[..., 1] = vgrid[..., 1] / H
+                        vgrid = 2 * vgrid - 1
+
+                        depth_sample = F.grid_sample(
+                            gt_depth, vgrid, padding_mode='zeros', align_corners=True)
+                        depth_sample = depth_sample.reshape(-1)
+
+                        # seen
+                        proj_depth_seen = - cam_cord[cur_mask_seen, 2].reshape(-1)
+                        nonoccluded = (proj_depth_seen < depth_sample[cur_mask_seen] + 0.10)
+                        cur_potential_occlusion_mask = torch.zeros_like(cur_mask_seen).bool().to(device)
+                        cur_potential_occlusion_mask[cur_mask_seen.clone()] = ~nonoccluded
+                        cur_mask_seen[cur_mask_seen.clone()] &= nonoccluded
+
                     seen_mask |= cur_mask_seen
-                    forecast_mask |= cur_mask_forecast
+                    # potential_occlusion_mask |= cur_potential_occlusion_mask
+                    # forecast_mask |= cur_mask_forecast
             else:
                 for keyframe in keyframe_dict:
                     c2w = keyframe['est_c2w'].cpu().numpy()
@@ -157,6 +179,10 @@ class Mesher(object):
                         gt_depth = keyframe['depth'].to(
                             device).reshape(1, 1, H, W)
                         vgrid = uv.reshape(1, 1, -1, 2)
+                        vgrid[..., 0] = vgrid[..., 0] / W
+                        vgrid[..., 1] = vgrid[..., 1] / H
+                        vgrid = 2 * vgrid - 1
+
                         depth_sample = F.grid_sample(
                             gt_depth, vgrid, padding_mode='zeros', align_corners=True)
                         depth_sample = depth_sample.reshape(-1)
@@ -169,9 +195,10 @@ class Mesher(object):
                         # seen
                         cur_mask_seen = cur_mask_seen.reshape(-1)
                         proj_depth_seen = - cam_cord[cur_mask_seen, 2].reshape(-1)
-                        cur_mask_seen[cur_mask_seen.clone()] &= \
-                            (proj_depth_seen < depth_sample[cur_mask_seen]+2.4) \
-                            & (depth_sample[cur_mask_seen]-2.4 < proj_depth_seen)
+                        nonoccluded = (proj_depth_seen < depth_sample[cur_mask_seen] + 0.10)
+                        cur_potential_occlusion_mask = torch.zeros_like(cur_mask_seen).bool().to(device)
+                        cur_potential_occlusion_mask[cur_mask_seen.clone()] = ~nonoccluded
+                        cur_mask_seen[cur_mask_seen.clone()] &= nonoccluded
                     else:
                         max_depth = torch.max(keyframe['depth'])*1.1
 
@@ -190,8 +217,11 @@ class Mesher(object):
                         )] &= proj_depth_seen < max_depth
 
                     seen_mask |= cur_mask_seen
-                    forecast_mask |= cur_mask_forecast
+                    # potential_occlusion_mask |= cur_potential_occlusion_mask
+                    # forecast_mask |= cur_mask_forecast
 
+            # unseen_mask = (~seen_mask) & potential_occlusion_mask
+            # seen_mask = ~unseen_mask
             forecast_mask &= ~seen_mask
             unseen_mask = ~(seen_mask | forecast_mask)
 
@@ -206,6 +236,7 @@ class Mesher(object):
         seen_mask = np.concatenate(seen_mask_list, axis=0)
         forecast_mask = np.concatenate(forecast_mask_list, axis=0)
         unseen_mask = np.concatenate(unseen_mask_list, axis=0)
+
         return seen_mask, forecast_mask, unseen_mask
 
     def get_bound_from_frames(self, keyframe_dict, scale=1):
@@ -302,7 +333,9 @@ class Mesher(object):
 
             pi = pi.unsqueeze(0)
             if self.nice:
-                ret = decoders(pi, c_grid=c, stage=stage)
+                ret, fine_raw = decoders(pi, c_grid=c, stage=stage)
+                untouched = fine_raw.abs().sum(dim=-1) != 0
+                # mask &= untouched
             else:
                 ret = decoders(pi, c_grid=None)
             ret = ret.squeeze(0)
@@ -329,13 +362,16 @@ class Mesher(object):
         bound = self.marching_cubes_bound
 
         padding = 0.05
-        x = np.linspace(bound[0][0] - padding, bound[0][1] + padding,
-                        resolution)
-        y = np.linspace(bound[1][0] - padding, bound[1][1] + padding,
-                        resolution)
-        z = np.linspace(bound[2][0] - padding, bound[2][1] + padding,
-                        resolution)
 
+        nsteps_x = ((bound[0][1] - bound[0][0] + 2 * padding) / resolution).round().int().item()
+        x = np.linspace(bound[0][0] - padding, bound[0][1] + padding, nsteps_x)
+        
+        nsteps_y = ((bound[1][1] - bound[1][0] + 2 * padding) / resolution).round().int().item()
+        y = np.linspace(bound[1][0] - padding, bound[1][1] + padding, nsteps_y)
+        
+        nsteps_z = ((bound[2][1] - bound[2][0] + 2 * padding) / resolution).round().int().item()
+        z = np.linspace(bound[2][0] - padding, bound[2][1] + padding, nsteps_z)
+        
         xx, yy, zz = np.meshgrid(x, y, z)
         grid_points = np.vstack([xx.ravel(), yy.ravel(), zz.ravel()]).T
         grid_points = torch.tensor(np.vstack(
@@ -376,13 +412,14 @@ class Mesher(object):
                 whether to use all frames or just keyframes when getting the seen/unseen mask. Defaults to False.
         """
         with torch.no_grad():
+            import time
+            start_time = time.time()
 
             grid = self.get_grid_uniform(self.resolution)
             points = grid['grid_points']
             points = points.to(device)
 
             if show_forecast:
-
                 seen_mask, forecast_mask, unseen_mask = self.point_masks(
                     points, keyframe_dict, estimate_c2w_list, idx, device=device, 
                     get_mask_use_all_frames=get_mask_use_all_frames)
@@ -390,16 +427,19 @@ class Mesher(object):
                 forecast_points = points[forecast_mask]
                 seen_points = points[seen_mask]
 
-                z_forecast = []
-                for i, pnts in enumerate(
-                        torch.split(forecast_points,
-                                    self.points_batch_size,
-                                    dim=0)):
-                    z_forecast.append(
-                        self.eval_points(pnts, decoders, c, 'coarse',
-                                         device).cpu().numpy()[:, -1])
-                z_forecast = np.concatenate(z_forecast, axis=0)
-                z_forecast += 0.2
+                print('Masking time: ', time.time() - start_time)
+
+                # z_forecast = []
+                # for i, pnts in enumerate(
+                #         torch.split(forecast_points,
+                #                     self.points_batch_size,
+                #                     dim=0)):
+                #     breakpoint()
+                #     z_forecast.append(
+                #         self.eval_points(pnts, decoders, c, 'coarse',
+                #                          device).cpu().numpy()[:, -1])
+                # z_forecast = np.concatenate(z_forecast, axis=0)
+                # z_forecast += 0.2
 
                 z_seen = []
                 for i, pnts in enumerate(
@@ -409,11 +449,13 @@ class Mesher(object):
                         self.eval_points(pnts, decoders, c, 'fine',
                                          device).cpu().numpy()[:, -1])
                 z_seen = np.concatenate(z_seen, axis=0)
+                print('Evaling time: ', time.time() - start_time)
 
                 z = np.zeros(points.shape[0])
                 z[seen_mask] = z_seen
-                z[forecast_mask] = z_forecast
-                z[unseen_mask] = -100
+                # z[seen_mask] = 1
+                # z[forecast_mask] = z_forecast
+                z[unseen_mask] = -1
 
             else:
                 mesh_bound = self.get_bound_from_frames(
@@ -460,6 +502,8 @@ class Mesher(object):
                     'marching_cubes error. Possibly no surface extracted from the level set.'
                 )
                 return
+
+            print('Cubing time: ', time.time() - start_time)
 
             # convert back to world coordinates
             vertices = verts + np.array(
@@ -508,6 +552,8 @@ class Mesher(object):
                 vertices = mesh.vertices
                 faces = mesh.faces
 
+            print('Cleaning time: ', time.time() - start_time)
+
             if color:
                 if self.color_mesh_extraction_method == 'direct_point_query':
                     # color is extracted by passing the coordinates of mesh vertices through the network
@@ -555,13 +601,13 @@ class Mesher(object):
                 vertex_colors = vertex_colors.astype(np.uint8)
 
                 # cyan color for forecast region
-                if show_forecast:
-                    seen_mask, forecast_mask, unseen_mask = self.point_masks(
-                        vertices, keyframe_dict, estimate_c2w_list, idx, device=device,
-                        get_mask_use_all_frames=get_mask_use_all_frames)
-                    vertex_colors[forecast_mask, 0] = 0
-                    vertex_colors[forecast_mask, 1] = 255
-                    vertex_colors[forecast_mask, 2] = 255
+                # if show_forecast:
+                #     seen_mask, forecast_mask, unseen_mask = self.point_masks(
+                #         vertices, keyframe_dict, estimate_c2w_list, idx, device=device,
+                #         get_mask_use_all_frames=get_mask_use_all_frames)
+                #     vertex_colors[forecast_mask, 0] = 0
+                #     vertex_colors[forecast_mask, 1] = 255
+                #     vertex_colors[forecast_mask, 2] = 255
 
             else:
                 vertex_colors = None
@@ -571,4 +617,5 @@ class Mesher(object):
             mesh.export(mesh_out_file)
             if self.verbose:
                 print('Saved mesh at', mesh_out_file)
-                
+            
+            print('Meshing time: ', time.time() - start_time)

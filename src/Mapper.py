@@ -38,7 +38,7 @@ class Mapper(object):
         else:
             self.truncation = slam.truncation
             self.c = slam.shared_c
-            self.c_aux = slam.shared_c_aux
+            # self.c_aux = slam.shared_c_aux
         self.bound = slam.bound
         self.logger = slam.logger
         self.mesher = slam.mesher
@@ -122,10 +122,14 @@ class Mapper(object):
                         (z_vals < (gt_depth[:, None] + 0.4 * self.truncation)), torch.ones_like(z_vals), torch.zeros_like(z_vals)).bool()
         tail_mask = (~front_mask) * (~back_mask) * (~center_mask)
 
+        
         fs_loss = torch.mean(torch.square(sdf[front_mask] - torch.ones_like(sdf[front_mask])))
         center_loss = torch.mean(torch.square((z_vals + sdf * self.truncation)[center_mask] - gt_depth[:, None].expand(z_vals.shape)[center_mask]))
         tail_loss = torch.mean(torch.square((z_vals + sdf * self.truncation)[tail_mask] - gt_depth[:, None].expand(z_vals.shape)[tail_mask]))
        
+        # back_loss = torch.mean(torch.square(sdf[back_mask] + torch.ones_like(sdf[back_mask])))
+        
+        # return 5 * fs_loss + 200 * center_loss + 10 * tail_loss + 0.00001 * back_loss
         return 5 * fs_loss + 200 * center_loss + 10 * tail_loss
 
     def get_mask_from_c2w(self, c2w, key, val_shape, depth_np):
@@ -379,6 +383,8 @@ class Mapper(object):
                         color_grid_para.append(val_grad)
 
         if self.nice:
+            decoders_para_list += list(
+                    self.decoders.sdf_decoder.parameters())
             if not self.fix_fine:
                 decoders_para_list += list(
                     self.decoders.fine_decoder.parameters())
@@ -532,10 +538,15 @@ class Mapper(object):
                 batch_rays_o = batch_rays_o[inside_mask]
                 batch_gt_depth = batch_gt_depth[inside_mask]
                 batch_gt_color = batch_gt_color[inside_mask]
-            ret = self.renderer.render_batch_ray(c, self.decoders, batch_rays_d,
+            # ret = self.renderer.render_batch_ray(c, self.decoders, batch_rays_d,
+            #                                      batch_rays_o, device, self.stage, self.truncation,
+            #                                      gt_depth=None if self.coarse_mapper else batch_gt_depth)
+            # depth, uncertainty, color, entr, sdf, z_vals = ret
+
+            ret = self.renderer.no_render_batch_ray(c, self.decoders, batch_rays_d,
                                                  batch_rays_o, device, self.stage, self.truncation,
                                                  gt_depth=None if self.coarse_mapper else batch_gt_depth)
-            depth, uncertainty, color, entr, sdf, z_vals = ret
+            sdf, z_vals = ret
 
             depth_mask = (batch_gt_depth > 0)
             ################### OLD Loss ################
