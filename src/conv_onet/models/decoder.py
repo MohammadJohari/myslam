@@ -379,6 +379,15 @@ class MyMLP(nn.Module):
         p_nor = p_nor.unsqueeze(0)
         vgrid = p_nor[:, :, None, None].float()
         # acutally trilinear interpolation if mode = 'bilinear'
+
+        # if self.name == 'fine':
+        #     from tqdm import tqdm
+        #     print(vgrid.shape)
+        #     vgrid = vgrid.expand(-1, -1, 8, -1, -1).clone()
+        #     for _ in tqdm(range(1000000)):
+        #         ccc = F.grid_sample(c, vgrid, padding_mode='zeros', align_corners=False,
+        #                   mode='nearest').squeeze(-1).squeeze(-1)
+
         c = F.grid_sample(c, vgrid, padding_mode='border', align_corners=True,
                           mode=self.sample_mode).squeeze(-1).squeeze(-1)
         return c
@@ -491,31 +500,39 @@ class SDF_Decoder_Sep(nn.Module):
 
 
         self.output_linear_mid = DenseLayer(
-                hidden_size, 1, activation="linear")
+                hidden_size, 1, activation="linear", bias=False)
         
         self.output_linear_fine = DenseLayer(
-                hidden_size, 1, activation="linear")
+                hidden_size, 1, activation="linear", bias=False)
 
     def forward(self, p, feat_mid, feat_fine, stage):
-        # print(p.min(), p.max(), p.abs().min(), p.abs().max())
-        p_nor = normalize_3d_coordinate(p.clone(), self.bound)
-        embedded_pts = self.embedder(p_nor.float())
-        # print(Fore.BLUE, embedded_pts.shape, feat.shape)
-        # print(Fore.WHITE)
-
+        # p_nor = normalize_3d_coordinate(p.clone(), self.bound)
+        # embedded_pts = self.embedder(p_nor.float())
+    
         if stage == 'middle':
             h = feat_mid
             for i, l in enumerate(self.linears_mid):
                 h = self.linears_mid[i](h)
                 h = F.relu(h)
-            out = torch.tanh(self.output_linear_mid(h))
+            # out = torch.tanh(self.output_linear_mid(h) - 0.10)
+            out = torch.tanh(self.output_linear_mid(h) - 0.10)
+            # out = self.output_linear_mid(h) - 0.10
+            # out = torch.sin(0.5 * torch.pi * torch.tanh(self.output_linear_mid(h) - 0.10))
+            # out = torch.sin(0.5 * torch.pi * self.output_linear_mid(h) - 0.10)
+            # out = torch.asin(torch.tanh(self.output_linear_mid(h) - 0.10)) * 2 / torch.pi * 1.1
         else:
             # h = torch.cat([feat_mid.detach(), feat_fine], dim=-1)
             h = torch.cat([feat_mid, feat_fine], dim=-1)
             for i, l in enumerate(self.linears_fine):
                 h = self.linears_fine[i](h)
                 h = F.relu(h)
-            out = torch.tanh(self.output_linear_fine(h))
+            # out = torch.tanh(self.output_linear_fine(h) - 0.10)
+            out = torch.tanh(self.output_linear_fine(h) - 0.10)
+            # out = self.output_linear_fine(h) - 0.10
+            # out = torch.sin(0.5 * torch.pi * torch.tanh(self.output_linear_fine(h) - 0.10))
+            # out = torch.sin(0.5 * torch.pi * self.output_linear_fine(h) - 0.10)
+            # out = torch.asin(torch.tanh(self.output_linear_fine(h) - 0.10)) * 2 / torch.pi * 1.1
+
 
         return out.squeeze(-1)
 
@@ -540,6 +557,8 @@ class MyNICE(nn.Module):
                  color_grid_len=0.16, hidden_size=32, coarse=False, pos_embedding_method='fourier'):
         super().__init__()
 
+        self.middle_grid_len = middle_grid_len
+
         self.middle_decoder = MyMLP(name='middle', dim=dim, c_dim=c_dim, color=False,
                                   skips=[2], n_blocks=2, hidden_size=hidden_size,
                                   grid_len=middle_grid_len, pos_embedding_method=pos_embedding_method)
@@ -551,6 +570,28 @@ class MyNICE(nn.Module):
                                  grid_len=color_grid_len, pos_embedding_method=pos_embedding_method)
 
         self.sdf_decoder = SDF_Decoder_Sep()
+
+    def get_neighbors(self, p, grid_len, grid, unit_len, device):
+        local_p = p / grid_len
+        local_floor = local_p.floor()
+        local_frac = local_p.frac()
+        
+        configs = torch.tensor([
+            [0, 0, 0],
+            [0, 0, 1],
+            [0, 1, 0],
+            [0, 1, 1],
+            [1, 0, 0],
+            [1, 0, 1],
+            [1, 1, 0],
+            [1, 1, 1],
+        ]).to(device)
+
+        print(configs.shape, p.shape, grid.shape)
+
+        # for i in range(8):
+        #     grid_read = 
+
 
     def forward(self, p, c_grid, stage='middle', **kwargs):
         """
@@ -569,6 +610,7 @@ class MyNICE(nn.Module):
         #     raw[..., -1] = middle_occ
         #     return raw
         elif stage == 'middle':
+            # self.get_neighbors(p, self.middle_grid_len, c_grid['grid_middle'], self.middle_grid_len, device)
             middle_occ = self.middle_decoder(p, c_grid)            
             fine_occ = self.fine_decoder(p, c_grid)
             raw = torch.zeros(middle_occ.shape[0], 4).to(device).float()

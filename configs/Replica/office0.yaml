@@ -4,4 +4,4 @@ mapping:
   marching_cubes_bound: [[-5.5,5.9],[-6.7,5.4],[-4.7,5.3]]
 data:
   input_folder: /idiap/resource/database/ETHZ-Replica/office0
-  output: /idiap/temp/mjohari/outputs/slam/Replica/o0_temp
+  output: /idiap/temp/mjohari/outputs/slam/Replica/o0_sep_mid24f08_enmid_noba_pert_farneg_0804_p1500

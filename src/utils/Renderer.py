@@ -107,7 +107,8 @@ class Renderer(object):
 
         if gt_depth is not None:
             # in case the bound is too large
-            far = torch.clamp(far_bb, 0,  torch.max(gt_depth*1.2))
+            # far = torch.clamp(far_bb, 0,  torch.max(gt_depth*1.2))
+            far = torch.clamp(far_bb, 0,  torch.max(gt_depth + truncation))
         else:
             far = far_bb
         if N_surface > 0:
@@ -251,7 +252,10 @@ class Renderer(object):
 
         if gt_depth is not None:
             # in case the bound is too large
-            far = torch.clamp(far_bb, 0,  torch.max(gt_depth*1.2))
+            # far = torch.clamp(far_bb, 0,  torch.max(gt_depth*1.2))
+            # far = torch.clamp(far_bb, 0,  torch.max(gt_depth + truncation))
+            far = far_bb.float()
+            far[gt_depth > 0] = gt_depth[gt_depth > 0] - truncation
         else:
             far = far_bb
         if N_surface > 0:
@@ -305,6 +309,10 @@ class Renderer(object):
         else:
             z_vals = 1./(1./near * (1.-t_vals) + 1./far * (t_vals))
 
+        if N_surface > 0:
+            z_vals, _ = torch.sort(
+                torch.cat([z_vals, z_vals_surface.double()], -1), -1)
+
         if self.perturb > 0.:
             # get intervals between samples
             mids = .5 * (z_vals[..., 1:] + z_vals[..., :-1])
@@ -313,10 +321,6 @@ class Renderer(object):
             # stratified samples in those intervals
             t_rand = torch.rand(z_vals.shape).to(device)
             z_vals = lower + (upper - lower) * t_rand
-
-        if N_surface > 0:
-            z_vals, _ = torch.sort(
-                torch.cat([z_vals, z_vals_surface.double()], -1), -1)
 
         pts = rays_o[..., None, :] + rays_d[..., None, :] * \
             z_vals[..., :, None]  # [N_rays, N_samples+N_surface, 3]

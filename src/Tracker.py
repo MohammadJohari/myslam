@@ -191,7 +191,7 @@ class Tracker(object):
 
         wandb_dir = self.cfg['data']['output']
         wandb_name = wandb_dir.split('/')[-1]
-        wandb.init(config=self.cfg, name=wandb_name, dir=wandb_dir)
+        # wandb.init(config=self.cfg, name=wandb_name, dir=wandb_dir)
 
         for idx, gt_color, gt_depth, gt_c2w in pbar:
             if not self.verbose:
@@ -318,8 +318,8 @@ class Tracker(object):
 
             while not wandb_q.empty():
                 wandb_val, wandb_idx = wandb_q.get()
-                wandb.log(wandb_val, wandb_idx)
+                # wandb.log(wandb_val, wandb_idx)
 
             if self.low_gpu_mem:
                 torch.cuda.empty_cache()
-        wandb.finish()
+        # wandb.finish()

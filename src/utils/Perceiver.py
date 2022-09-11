@@ -384,9 +384,9 @@ class Perceiver(nn.Module):
             x = cross_attn(x, context = data, mask = mask) + x
             x = cross_ff(x) + x
 
-            # for self_attn, self_ff in self_attns:
-            #     x = self_attn(x) + x
-            #     x = self_ff(x) + x
+            for self_attn, self_ff in self_attns:
+                x = self_attn(x) + x
+                x = self_ff(x) + x
 
         # allow for fetching embeddings
 
@@ -400,13 +400,13 @@ class Perceiver(nn.Module):
 if __name__ == '__main__':
 
     model = Perceiver(
-        input_channels = 32,          # number of channels for each token of the input
+        input_channels = 11,          # number of channels for each token of the input
         input_axis = 2,              # number of axis for input data (2 for images, 3 for video)
         num_freq_bands = 6,          # number of freq bands, with original value (2 * K + 1)
         max_freq = 10.,              # maximum frequency, hyperparameter depending on how fine the data is
         depth = 1,                   # depth of net. The shape of the final attention mechanism will be:
                                     #   depth * (cross attention -> self_per_cross_attn * self attention)
-        num_latents = 1,           # number of latents, or induced set points, or centroids. different papers giving it different names
+        num_latents = 4,           # number of latents, or induced set points, or centroids. different papers giving it different names
         latent_dim = 8,            # latent dimension
         cross_heads = 1,             # number of heads for cross attention. paper said 1
         latent_heads = 1,            # number of heads for latent self attention, 8
@@ -422,7 +422,7 @@ if __name__ == '__main__':
 
     from tqdm import tqdm
 
-    img = torch.empty(1000 * 24, 4, 4, 32).requires_grad_().cuda() # 1 imagenet image, pixelized
+    img = torch.empty(1500 * 12, 4, 4, 11).requires_grad_().cuda() # 1 imagenet image, pixelized
     model.cuda()
 
     for _ in tqdm(range(500)):

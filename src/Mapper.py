@@ -340,7 +340,7 @@ class Mapper(object):
         middle_grid_para = []
         fine_grid_para = []
         color_grid_para = []
-        gt_depth_np = cur_gt_depth.cpu().numpy()
+        # gt_depth_np = cur_gt_depth.cpu().numpy()
 
         iter_time = time.time()
 
@@ -443,8 +443,8 @@ class Mapper(object):
             from torch.optim.lr_scheduler import StepLR
             scheduler = StepLR(optimizer, step_size=200, gamma=0.8)
 
-
         for joint_iter in range(num_joint_iters):
+            start_time_joint = time.time()
             # print("---Before joint: %s seconds ---" % (time.time() - iter_time))
             if self.nice:
                 if self.frustum_feature_selection:
@@ -543,6 +543,15 @@ class Mapper(object):
             #                                      gt_depth=None if self.coarse_mapper else batch_gt_depth)
             # depth, uncertainty, color, entr, sdf, z_vals = ret
 
+            # if self.BA:
+            #     from tqdm import tqdm
+            #     for _ in tqdm(range(10000000)):
+            #         ret = self.renderer.no_render_batch_ray(c, self.decoders, batch_rays_d,
+            #                                      batch_rays_o, device, self.stage, self.truncation,
+            #                                      gt_depth=None if self.coarse_mapper else batch_gt_depth)
+            #         loss = ret[0].mean()
+            #         loss.backward(retain_graph=True)
+
             ret = self.renderer.no_render_batch_ray(c, self.decoders, batch_rays_d,
                                                  batch_rays_o, device, self.stage, self.truncation,
                                                  gt_depth=None if self.coarse_mapper else batch_gt_depth)
@@ -630,6 +639,8 @@ class Mapper(object):
                         val = val.detach()
                         val[mask] = val_grad.clone().detach()
                         c[key] = val
+
+            # print('end of joint:', time.time() - start_time_joint)
 
         if self.BA:
             # put the updated camera poses back
@@ -731,8 +742,10 @@ class Mapper(object):
                     if (idx % self.keyframe_every == 0 or (idx == self.n_img-2)) \
                             and (idx not in self.keyframe_list):
                         self.keyframe_list.append(idx)
-                        self.keyframe_dict.append({'gt_c2w': gt_c2w.cpu(), 'idx': idx, 'color': gt_color.cpu(
-                        ), 'depth': gt_depth.cpu(), 'est_c2w': cur_c2w.clone()})
+                        # self.keyframe_dict.append({'gt_c2w': gt_c2w.cpu(), 'idx': idx, 'color': gt_color.cpu(
+                        # ), 'depth': gt_depth.cpu(), 'est_c2w': cur_c2w.clone()})
+                        self.keyframe_dict.append({'gt_c2w': gt_c2w, 'idx': idx, 'color': gt_color,
+                        'depth': gt_depth, 'est_c2w': cur_c2w.clone()})
 
             prefix = 'Auxiliary' if self.aux_mapper else ''
             print("---%s Mapping Time: %s seconds ---" % (prefix, (time.time() - start_time)))
@@ -762,12 +775,13 @@ class Mapper(object):
                                          clean_mesh=self.clean_mesh, get_mask_use_all_frames=False)
 
                 if idx == self.n_img-1:
-                    mesh_out_file = f'{self.output}/mesh/final_mesh.ply'
-                    self.mesher.get_mesh(mesh_out_file, self.c, self.decoders, self.keyframe_dict, self.estimate_c2w_list,
-                                         idx,  self.device, show_forecast=self.mesh_coarse_level,
-                                         clean_mesh=self.clean_mesh, get_mask_use_all_frames=False)
-                    os.system(
-                        f"cp {mesh_out_file} {self.output}/mesh/{idx:05d}_mesh.ply")
+                    # mesh_out_file = f'{self.output}/mesh/final_mesh.ply'
+                    # self.mesher.get_mesh(mesh_out_file, self.c, self.decoders, self.keyframe_dict, self.estimate_c2w_list,
+                    #                      idx,  self.device, show_forecast=self.mesh_coarse_level,
+                    #                      clean_mesh=self.clean_mesh, get_mask_use_all_frames=False)
+                    # os.system(
+                    #     f"cp {mesh_out_file} {self.output}/mesh/{idx:05d}_mesh.ply")
+                    
                     if self.eval_rec:
                         mesh_out_file = f'{self.output}/mesh/final_mesh_eval_rec.ply'
                         self.mesher.get_mesh(mesh_out_file, self.c, self.decoders, self.keyframe_dict,

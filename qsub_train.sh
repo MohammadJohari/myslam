@@ -14,16 +14,9 @@ python_command="run.py configs/Replica/room0.yaml"
 
 expname="o0_sigin"
 expname="ex"$RANDOM
-dirname=".temp_"$expname
-
-## Creating new directory for execution
-# rm -rf .temp_ex/*
-mkdir -p $dirname
-rsync -r * $dirname --exclude=".temp_ex*"
-cd $dirname
 
 if [ $(qstat | grep ${expname} -c) == 0 ]; then
-  log_dir="../grid_logs"
+  log_dir="grid_logs"
   log_file="${log_dir}/${expname}.log"
   mkdir -p "${log_dir}"
   rm -f ${log_file}
@@ -32,5 +25,3 @@ if [ $(qstat | grep ${expname} -c) == 0 ]; then
 else
   echo "The job is already running"
 fi
-
-cd ..
