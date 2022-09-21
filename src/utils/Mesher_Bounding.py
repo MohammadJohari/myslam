@@ -143,7 +143,7 @@ class Mesher(object):
                         cur_mask_seen[cur_mask_seen.clone()] &= nonoccluded
 
                     seen_mask |= cur_mask_seen
-                    # potential_occlusion_mask |= cur_potential_occlusion_mask
+                    potential_occlusion_mask |= cur_potential_occlusion_mask
                     # forecast_mask |= cur_mask_forecast
             else:
                 for keyframe in keyframe_dict:
@@ -217,13 +217,13 @@ class Mesher(object):
                         )] &= proj_depth_seen < max_depth
 
                     seen_mask |= cur_mask_seen
-                    # potential_occlusion_mask |= cur_potential_occlusion_mask
+                    potential_occlusion_mask |= cur_potential_occlusion_mask
                     # forecast_mask |= cur_mask_forecast
 
-            # unseen_mask = (~seen_mask) & potential_occlusion_mask
-            # seen_mask = ~unseen_mask
-            forecast_mask &= ~seen_mask
-            unseen_mask = ~(seen_mask | forecast_mask)
+            unseen_mask = (~seen_mask) & potential_occlusion_mask
+            seen_mask = ~unseen_mask
+            # forecast_mask &= ~seen_mask
+            # unseen_mask = ~(seen_mask | forecast_mask)
 
             seen_mask = seen_mask.cpu().numpy()
             forecast_mask = forecast_mask.cpu().numpy()
@@ -333,9 +333,8 @@ class Mesher(object):
 
             pi = pi.unsqueeze(0)
             if self.nice:
-                ret, fine_raw = decoders(pi, torch.zeros_like(pi), c_grid=c, stage=stage)
-                # untouched = fine_raw.abs().sum(dim=-1) != 0
-                # untouched = (fine_raw == 0.01).float().mean(dim=-1) != 1
+                ret, fine_raw = decoders(pi, c_grid=c, stage=stage)
+                untouched = fine_raw.abs().sum(dim=-1) != 0
                 # mask &= untouched
             else:
                 ret = decoders(pi, c_grid=None)
@@ -454,7 +453,7 @@ class Mesher(object):
 
                 z = np.zeros(points.shape[0])
                 z[seen_mask] = z_seen
-                # z[seen_mask] = 1
+                z[seen_mask] = 1
                 # z[forecast_mask] = z_forecast
                 z[unseen_mask] = -1
 

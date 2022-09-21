@@ -349,8 +349,10 @@ class Perceiver(nn.Module):
         self.to_logits = nn.Sequential(
             Reduce('b n d -> b d', 'mean'),
             nn.LayerNorm(latent_dim),
-            nn.Linear(latent_dim, num_classes)
+            nn.Linear(latent_dim, num_classes, bias=False)
         ) if final_classifier_head else nn.Identity()
+
+        self.sepehr_lin = nn.Linear(35, input_channels)
 
     def forward(
         self,
@@ -358,6 +360,7 @@ class Perceiver(nn.Module):
         mask = None,
         return_embeddings = False
     ):
+        data = self.sepehr_lin(data)
         b, *axis, _, device, dtype = *data.shape, data.device, data.dtype
         assert len(axis) == self.input_axis, 'input data must have the right number of axis'
 
@@ -384,9 +387,9 @@ class Perceiver(nn.Module):
             x = cross_attn(x, context = data, mask = mask) + x
             x = cross_ff(x) + x
 
-            for self_attn, self_ff in self_attns:
-                x = self_attn(x) + x
-                x = self_ff(x) + x
+            # for self_attn, self_ff in self_attns:
+            #     x = self_attn(x) + x
+            #     x = self_ff(x) + x
 
         # allow for fetching embeddings
 

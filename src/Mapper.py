@@ -38,6 +38,7 @@ class Mapper(object):
         else:
             self.truncation = slam.truncation
             self.c = slam.shared_c
+            self.c_mask = slam.shared_c_mask
             # self.c_aux = slam.shared_c_aux
         self.bound = slam.bound
         self.logger = slam.logger
@@ -118,7 +119,7 @@ class Mapper(object):
     def sdf_loss(self, sdf, z_vals, gt_depth):
         front_mask = torch.where(z_vals < (gt_depth[:, None] - self.truncation), torch.ones_like(z_vals), torch.zeros_like(z_vals)).bool()
         back_mask = torch.where(z_vals > (gt_depth[:, None] + self.truncation), torch.ones_like(z_vals), torch.zeros_like(z_vals)).bool()        
-        center_mask = torch.where((z_vals > (gt_depth[:, None] - 0.4 * self.truncation)) * 
+        center_mask = torch.where((z_vals > (gt_depth[:, None] - 0.4 * self.truncation)) *
                         (z_vals < (gt_depth[:, None] + 0.4 * self.truncation)), torch.ones_like(z_vals), torch.zeros_like(z_vals)).bool()
         tail_mask = (~front_mask) * (~back_mask) * (~center_mask)
 
@@ -128,8 +129,14 @@ class Mapper(object):
         tail_loss = torch.mean(torch.square((z_vals + sdf * self.truncation)[tail_mask] - gt_depth[:, None].expand(z_vals.shape)[tail_mask]))
        
         # back_loss = torch.mean(torch.square(sdf[back_mask] + torch.ones_like(sdf[back_mask])))
-        
-        # return 5 * fs_loss + 200 * center_loss + 10 * tail_loss + 0.00001 * back_loss
+        # back_loss = torch.mean((sdf[:, :-1] - sdf[:, 1:])[back_mask[:, :-1]] ** 2)
+        # new_loss = torch.mean(torch.exp(-10 * sdf[back_mask].abs()))
+
+        # sdf_back = sdf[back_mask]
+        # back_loss = torch.mean(torch.minimum(torch.square(sdf_back + torch.ones_like(sdf_back)), torch.square(sdf_back - torch.ones_like(sdf_back))))
+
+        # return 5 * fs_loss + 200 * center_loss + 10 * tail_loss + 0.01 * back_loss + 0.001 * new_loss
+        # return 5 * fs_loss + 200 * center_loss + 10 * tail_loss + 0.001 * back_loss
         return 5 * fs_loss + 200 * center_loss + 10 * tail_loss
 
     def get_mask_from_c2w(self, c2w, key, val_shape, depth_np):
@@ -552,7 +559,7 @@ class Mapper(object):
             #         loss = ret[0].mean()
             #         loss.backward(retain_graph=True)
 
-            ret = self.renderer.no_render_batch_ray(c, self.decoders, batch_rays_d,
+            ret = self.renderer.no_render_batch_ray(c, self.c_mask, self.decoders, batch_rays_d,
                                                  batch_rays_o, device, self.stage, self.truncation,
                                                  gt_depth=None if self.coarse_mapper else batch_gt_depth)
             sdf, z_vals = ret
@@ -566,8 +573,8 @@ class Mapper(object):
             #     weighted_color_loss = self.w_color_loss*color_loss
             #     loss += weighted_color_loss
             ##############################################
-
             loss = self.sdf_loss(sdf[depth_mask], z_vals[depth_mask], batch_gt_depth[depth_mask])
+            # loss = loss + 0.1 * torch.mean(torch.square(sdf[:, -1] + torch.ones_like(sdf[:, -1])))
             # loss = loss + 0.1 * torch.mean(torch.square(sdf + 0.25 * torch.ones_like(sdf)))
 
             ## Sepehr Color loss
@@ -620,7 +627,38 @@ class Mapper(object):
             #         # print('loss: ', loss, 'tv loss: ', tv_loss.item())
             #         loss += 0.01 * tv_loss
 
+            # for key in ['grid_middle', 'grid_fine']:
+            #     tv1 = (torch.pow((c[key][..., 1:] - c[key][...,:-1]),2) * self.c_mask[key][...,:-1]).sum() / (self.c_mask[key][...,:-1].sum() + 1e-6)
+            #     tv2 = (torch.pow((c[key][..., 1:, :] - c[key][...,:-1, :]),2) * self.c_mask[key][...,:-1, :]).sum() / (self.c_mask[key][...,:-1, :].sum() + 1e-6)
+            #     tv3 = (torch.pow((c[key][..., 1:, :, :] - c[key][...,:-1, :, :]),2) * self.c_mask[key][...,:-1, :, :]).sum() / (self.c_mask[key][...,:-1, :, :].sum() + 1e-6)
+            #     tv_loss = tv1 + tv2 + tv3
+            #     # print('loss: ', loss, 'tv loss: ', tv_loss.item())
+            #     loss += 0.01 * tv_loss
 
+            pooling = {'grid_middle': torch.nn.AvgPool3d(3, stride=1, padding=1, count_include_pad=False),
+                       'grid_fine': torch.nn.AvgPool3d(3, stride=1, padding=1, count_include_pad=False)
+            }
+            for key in ['grid_middle', 'grid_fine']:
+            # for key in ['grid_middle']:
+                tv_loss = (torch.pow(c[key] - pooling[key](c[key].detach()), 2) * self.c_mask[key]).sum() / (self.c_mask[key].sum() + 1e-6)
+
+                # p3d = (1, 1, 1, 1, 1, 1)
+                # c_padded = F.pad(c[key].detach(), p3d, "constant", -1)
+                # # mask_padded = F.pad(self.c_mask[key], p3d, "constant", 0)
+                # tv_loss = (torch.pow(c[key] - pooling[key](c_padded), 2) * self.c_mask[key]).sum() / (self.c_mask[key].sum() + 1e-6)
+
+                loss += 0.5 * tv_loss
+
+            #### random negs
+            # if idx == 0:
+            #     pts = torch.rand([5000, 3]).to(device)
+            #     pts[:, 0] = pts[:, 0] * (self.bound[0, 1] - self.bound[0, 0]) + self.bound[0, 0]
+            #     pts[:, 1] = pts[:, 1] * (self.bound[1, 1] - self.bound[1, 0]) + self.bound[1, 0]
+            #     pts[:, 2] = pts[:, 2] * (self.bound[2, 1] - self.bound[2, 0]) + self.bound[2, 0]
+            #
+            #     rnd_sdf = self.renderer.eval_points(pts, torch.zeros_like(pts), self.decoders, c, None, 'color', device)[..., -1]
+            #     rnd_loss = ((rnd_sdf + torch.ones_like(rnd_sdf)) ** 2).mean()
+            #     loss = loss + 0 * rnd_loss
 
             loss.backward(retain_graph=False)
             optimizer.step()
@@ -706,8 +744,8 @@ class Mapper(object):
 
                 # here provides a color refinement postprocess
                 if idx == self.n_img-1 and self.color_refine and not self.coarse_mapper:
-                    outer_joint_iters = 5
-                    self.mapping_window_size *= 2
+                    outer_joint_iters = 10
+                    self.mapping_window_size *= 4
                     self.middle_iter_ratio = 0.0
                     self.fine_iter_ratio = 0.0
                     num_joint_iters *= 5

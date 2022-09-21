@@ -92,6 +92,11 @@ class NICE_SLAM():
         #     val.share_memory_()
         #     self.shared_c_aux[key] = val
 
+        for key, val in self.shared_c_mask.items():
+            val = val.to(self.cfg['mapping']['device'])
+            val.share_memory_()
+            self.shared_c_mask[key] = val
+
         self.shared_decoders = self.shared_decoders.to(
             self.cfg['mapping']['device'])
         self.shared_decoders.share_memory()
@@ -222,6 +227,7 @@ class NICE_SLAM():
 
         c = {}
         c_aux = {}
+        c_mask = {}
         c_dim = cfg['model']['c_dim']
         o_dim = 8
         xyz_len = self.bound[:, 1]-self.bound[:, 0]
@@ -247,6 +253,7 @@ class NICE_SLAM():
 
         c[middle_key] = middle_val
         # c_aux[middle_key] = middle_val.clone()
+        c_mask[middle_key] = torch.ones([1, 1, *val_shape[2:]])
 
         fine_key = 'grid_fine'
         fine_val_shape = list(map(int, (xyz_len/fine_grid_len).tolist()))
@@ -254,10 +261,11 @@ class NICE_SLAM():
         self.fine_val_shape = fine_val_shape
         val_shape = [1, o_dim, *fine_val_shape]
         fine_val = torch.zeros(val_shape).normal_(mean=0, std=0.01)
-        # fine_val = torch.zeros(val_shape)
         c[fine_key] = fine_val
-        # c_aux[fine_key] = fine_val.clone()
         print('Fine Shape: ', val_shape)
+
+        # c_aux[fine_key] = fine_val.clone()
+        c_mask[fine_key] = torch.ones([1, 1, *val_shape[2:]])
 
         color_key = 'grid_color'
         color_val_shape = list(map(int, (xyz_len/color_grid_len).tolist()))
@@ -269,6 +277,7 @@ class NICE_SLAM():
 
         self.shared_c = c
         # self.shared_c_aux = c_aux
+        self.shared_c_mask = c_mask
 
     def tracking(self, rank, wandb_q):
         """

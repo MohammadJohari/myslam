@@ -20,7 +20,7 @@ class Renderer(object):
 
         self.H, self.W, self.fx, self.fy, self.cx, self.cy = slam.H, slam.W, slam.fx, slam.fy, slam.cx, slam.cy
 
-    def eval_points(self, p, decoders, c=None, stage='color', device='cuda:0'):
+    def eval_points(self, p, p_mask, decoders, c=None, c_mask=None, stage='color', device='cuda:0'):
         """
         Evaluates the occupancy and/or color value for the points.
 
@@ -36,9 +36,10 @@ class Renderer(object):
         """
 
         p_split = torch.split(p, self.points_batch_size)
+        p_mask_split = torch.split(p_mask, self.points_batch_size)
         bound = self.bound
         rets = []
-        for pi in p_split:
+        for pi, pi_mask in zip(p_split, p_mask_split):
             # mask for points out of bound
             mask_x = (pi[:, 0] < bound[0][1]) & (pi[:, 0] > bound[0][0])
             mask_y = (pi[:, 1] < bound[1][1]) & (pi[:, 1] > bound[1][0])
@@ -46,8 +47,9 @@ class Renderer(object):
             mask = mask_x & mask_y & mask_z
 
             pi = pi.unsqueeze(0)
+            pi_mask = pi_mask.unsqueeze(0)
             if self.nice:
-                ret, _ = decoders(pi, c_grid=c, stage=stage)
+                ret, _ = decoders(pi, pi_mask, c_grid=c, c_mask=c_mask, stage=stage)
             else:
                 ret = decoders(pi, c_grid=None)
             ret = ret.squeeze(0)
@@ -179,7 +181,7 @@ class Renderer(object):
             z_vals[..., :, None]  # [N_rays, N_samples+N_surface, 3]
         pointsf = pts.reshape(-1, 3)
 
-        raw = self.eval_points(pointsf, decoders, c, stage, device)
+        raw = self.eval_points(pointsf, decoders, c, None, stage, device)
         raw = raw.reshape(N_rays, N_samples+N_surface, -1)
 
         depth, uncertainty, color, weights, entr = raw2outputs_nerf_color(
@@ -206,7 +208,7 @@ class Renderer(object):
 
         return depth, uncertainty, color, entr, sdf, z_vals
 
-    def no_render_batch_ray(self, c, decoders, rays_d, rays_o, device, stage, truncation, gt_depth=None):
+    def no_render_batch_ray(self, c, c_mask, decoders, rays_d, rays_o, device, stage, truncation, gt_depth=None):
         """
         Render color, depth and uncertainty of a batch of rays.
 
@@ -252,10 +254,9 @@ class Renderer(object):
 
         if gt_depth is not None:
             # in case the bound is too large
-            # far = torch.clamp(far_bb, 0,  torch.max(gt_depth*1.2))
-            # far = torch.clamp(far_bb, 0,  torch.max(gt_depth + truncation))
-            far = far_bb.float()
-            far[gt_depth > 0] = gt_depth[gt_depth > 0] - truncation
+            far = torch.clamp(far_bb, 0,  torch.max(gt_depth*1.2))
+            # far = far_bb.float()
+            # far[gt_depth > 0] = gt_depth[gt_depth > 0] - truncation
         else:
             far = far_bb
         if N_surface > 0:
@@ -309,10 +310,6 @@ class Renderer(object):
         else:
             z_vals = 1./(1./near * (1.-t_vals) + 1./far * (t_vals))
 
-        if N_surface > 0:
-            z_vals, _ = torch.sort(
-                torch.cat([z_vals, z_vals_surface.double()], -1), -1)
-
         if self.perturb > 0.:
             # get intervals between samples
             mids = .5 * (z_vals[..., 1:] + z_vals[..., :-1])
@@ -322,11 +319,30 @@ class Renderer(object):
             t_rand = torch.rand(z_vals.shape).to(device)
             z_vals = lower + (upper - lower) * t_rand
 
+
+        if N_surface > 0:
+            if self.perturb > 0.:
+                # get intervals between samples
+                mids = .5 * (z_vals_surface[..., 1:] + z_vals_surface[..., :-1])
+                upper = torch.cat([mids, z_vals_surface[..., -1:]], -1)
+                lower = torch.cat([z_vals_surface[..., :1], mids], -1)
+                # stratified samples in those intervals
+                t_rand = torch.rand(z_vals_surface.shape).to(device)
+                z_vals_surface = lower + (upper - lower) * t_rand
+
+            z_vals, _ = torch.sort(
+                torch.cat([z_vals, z_vals_surface.double()], -1), -1)
+
         pts = rays_o[..., None, :] + rays_d[..., None, :] * \
             z_vals[..., :, None]  # [N_rays, N_samples+N_surface, 3]
         pointsf = pts.reshape(-1, 3)
 
-        raw = self.eval_points(pointsf, decoders, c, stage, device)
+        pointsf_mask = (z_vals < gt_depth + truncation).reshape(-1)
+        # pointsf_mask = (z_vals < gt_depth + truncation)
+        # pointsf_mask[:, -1] = True
+        # pointsf_mask = pointsf_mask.reshape(-1)
+
+        raw = self.eval_points(pointsf, pointsf_mask, decoders, c, c_mask, stage, device)
         raw = raw.reshape(N_rays, N_samples+N_surface, -1)
 
         # depth, uncertainty, color, weights, entr = raw2outputs_nerf_color(

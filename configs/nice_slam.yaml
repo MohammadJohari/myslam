@@ -7,7 +7,7 @@ low_gpu_mem: True
 grid_len:
   coarse: 2 
   middle: 0.24
-  fine: 0.08
+  fine: 0.06
   color: 0.16
   bound_divisable: 0.24
 pretrained_decoders:
@@ -43,8 +43,8 @@ tracking:
 mapping:
   device: "cuda:0"
   color_refine: False
-  middle_iter_ratio: 0.4
-  fine_iter_ratio: 0.6
+  middle_iter_ratio: -0.4
+  fine_iter_ratio: -0.6
   every_frame: 5
   BA: False
   BA_cam_lr: 0.001
@@ -91,7 +91,8 @@ mapping:
       fine_lr: 0.005
       color_lr: 0.0
     color:
-      decoders_lr: 0.005
+#      decoders_lr: 0.005
+      decoders_lr: 0.0001
       coarse_lr: 0.0
       middle_lr: 0.005
       # middle_lr: 0.0
@@ -108,7 +109,7 @@ cam:
   png_depth_scale: 6553.5 #for depth image in png format
   crop_edge: 0
 rendering:
-  N_samples: 8
+  N_samples: 32
   N_surface: 4
   N_importance: 0
   lindisp: False
