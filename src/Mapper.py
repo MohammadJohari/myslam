@@ -9,12 +9,17 @@ from torch.autograd import Variable
 
 from src.common import (get_camera_from_tensor, get_samples,
                         get_tensor_from_camera, random_select)
-from src.utils.datasets import get_dataset
+from src.utils.datasets import get_dataset, SeqSampler
 from src.utils.Visualizer import Visualizer
+from src.tools.full_cull_mesh import cull_mesh
 
 import torch.nn.functional as F
+from torch.utils.data import DataLoader
 
 from torch.optim import Adam
+
+
+from tqdm import tqdm
 
 class Mapper(object):
     """
@@ -50,6 +55,9 @@ class Mapper(object):
         self.mapping_idx = slam.mapping_idx
         self.mapping_cnt = slam.mapping_cnt
         self.decoders = slam.shared_decoders
+        self.planes_xy = slam.shared_planes_xy
+        self.planes_xz = slam.shared_planes_xz
+        self.planes_yz = slam.shared_planes_yz
         self.estimate_c2w_list = slam.estimate_c2w_list
         self.mapping_first_frame = slam.mapping_first_frame
 
@@ -95,6 +103,22 @@ class Mapper(object):
         self.frame_reader = get_dataset(
             cfg, args, self.scale, device=self.device)
         self.n_img = len(self.frame_reader)
+        self.frame_loader = DataLoader(self.frame_reader, batch_size=1, num_workers=2, pin_memory=False, prefetch_factor=2, sampler=SeqSampler(self.n_img, self.every_frame))
+
+        ################################################
+        # ray_dataset = get_ray_dataset(cfg, args, self.scale, device=self.device)
+        # from tqdm import tqdm
+        # loader = DataLoader(ray_dataset, batch_size=1, num_workers=1, pin_memory=False, prefetch_factor=2)
+        # xx = iter(loader)
+        # for i in tqdm(range(10000000)):
+        #     _, gt_color, gt_depth, gt_c2w = self.frame_reader[i]
+        #     # xxx = next(xx)
+        #     # time.sleep(0.1)
+        #
+        # # _ = next(xx)
+
+        ################################################
+
         if 'Demo' not in self.output:  # disable this visualization in demo
             self.visualizer = Visualizer(freq=cfg['mapping']['vis_freq'], inside_freq=cfg['mapping']['vis_inside_freq'],
                                          vis_dir=os.path.join(self.output, 'mapping_vis'), renderer=self.renderer,
@@ -304,8 +328,7 @@ class Mapper(object):
         c = self.c
         cfg = self.cfg
         device = self.device
-        bottom = torch.from_numpy(np.array([0, 0, 0, 1.]).reshape(
-            [1, 4])).type(torch.float32).to(device)
+        bottom = torch.tensor([0, 0, 0, 1.], device=device).reshape(1, 4)
 
         if len(keyframe_dict) == 0:
             optimize_frame = []
@@ -343,67 +366,14 @@ class Mapper(object):
         pixs_per_image = self.mapping_pixels//len(optimize_frame)
 
         decoders_para_list = []
-        coarse_grid_para = []
-        middle_grid_para = []
-        fine_grid_para = []
-        color_grid_para = []
-        # gt_depth_np = cur_gt_depth.cpu().numpy()
+        decoders_para_list += list(self.decoders.parameters())
 
-        iter_time = time.time()
-
-        if self.nice:
-            if self.frustum_feature_selection:
-                masked_c_grad = {}
-                mask_c2w = cur_c2w
-            for key, val in c.items():
-                if not self.frustum_feature_selection:
-                    val = Variable(val.to(device), requires_grad=True)
-                    c[key] = val
-                    if key == 'grid_coarse':
-                        coarse_grid_para.append(val)
-                    elif key == 'grid_middle':
-                        middle_grid_para.append(val)
-                    elif key == 'grid_fine':
-                        fine_grid_para.append(val)
-                    elif key == 'grid_color':
-                        color_grid_para.append(val)
-
-                else:
-                    mask = self.get_mask_from_c2w(
-                        mask_c2w, key, val.shape[2:], gt_depth_np)
-                    mask = torch.from_numpy(mask).permute(2, 1, 0).unsqueeze(
-                        0).unsqueeze(0).repeat(1, val.shape[1], 1, 1, 1)
-                    val = val.to(device)
-                    # val_grad is the optimizable part, other parameters will be fixed
-                    val_grad = val[mask].clone()
-                    val_grad = Variable(val_grad.to(
-                        device), requires_grad=True)
-                    masked_c_grad[key] = val_grad
-                    masked_c_grad[key+'mask'] = mask
-                    if key == 'grid_coarse':
-                        coarse_grid_para.append(val_grad)
-                    elif key == 'grid_middle':
-                        middle_grid_para.append(val_grad)
-                    elif key == 'grid_fine':
-                        fine_grid_para.append(val_grad)
-                    elif key == 'grid_color':
-                        color_grid_para.append(val_grad)
-
-        if self.nice:
-            decoders_para_list += list(
-                    self.decoders.sdf_decoder.parameters())
-            if not self.fix_fine:
-                decoders_para_list += list(
-                    self.decoders.fine_decoder.parameters())
-            if not self.fix_color:
-                decoders_para_list += list(
-                    self.decoders.color_decoder.parameters())
-        else:
-            # imap*, single MLP
-            decoders_para_list += list(self.decoders.parameters())
-
-        # print("******************************************")
-        # print("---After mask: %s seconds ---" % (time.time() - iter_time))
+        planes_para = []
+        for planes in [self.planes_xy, self.planes_xz, self.planes_yz]:
+            for i, plane in enumerate(planes):
+                plane = Variable(plane, requires_grad=True)
+                planes_para.append(plane)
+                planes[i] = plane
 
         if self.BA:
             camera_tensor_list = []
@@ -424,156 +394,80 @@ class Mapper(object):
                     gt_camera_tensor = get_tensor_from_camera(gt_c2w)
                     gt_camera_tensor_list.append(gt_camera_tensor)
 
-        if self.nice:
-            if self.BA:
-                # The corresponding lr will be set according to which stage the optimization is in
-                optimizer = Adam([{'params': decoders_para_list, 'lr': 0},
-                                              {'params': coarse_grid_para, 'lr': 0},
-                                              {'params': middle_grid_para, 'lr': 0},
-                                              {'params': fine_grid_para, 'lr': 0},
-                                              {'params': color_grid_para, 'lr': 0},
-                                              {'params': camera_tensor_list, 'lr': 0}])
-            else:
-                optimizer = Adam([{'params': decoders_para_list, 'lr': 0},
-                                              {'params': coarse_grid_para, 'lr': 0},
-                                              {'params': middle_grid_para, 'lr': 0},
-                                              {'params': fine_grid_para, 'lr': 0},
-                                              {'params': color_grid_para, 'lr': 0}], betas=(0.9, 0.999))
+        if self.BA:
+            # The corresponding lr will be set according to which stage the optimization is in
+            optimizer = Adam([{'params': decoders_para_list, 'lr': 0},
+                              {'params': planes_para, 'lr': 0},
+                              {'params': camera_tensor_list, 'lr': 0}])
         else:
-            # imap*, single MLP
-            if self.BA:
-                optimizer = torch.optim.Adam([{'params': decoders_para_list, 'lr': 0},
-                                              {'params': camera_tensor_list, 'lr': 0}])
-            else:
-                optimizer = torch.optim.Adam(
-                    [{'params': decoders_para_list, 'lr': 0}])
-            from torch.optim.lr_scheduler import StepLR
-            scheduler = StepLR(optimizer, step_size=200, gamma=0.8)
+            optimizer = Adam([{'params': decoders_para_list, 'lr': 0},
+                              {'params': planes_para, 'lr': 0}])
 
         for joint_iter in range(num_joint_iters):
-            start_time_joint = time.time()
-            # print("---Before joint: %s seconds ---" % (time.time() - iter_time))
-            if self.nice:
-                if self.frustum_feature_selection:
-                    for key, val in c.items():
-                        if (self.coarse_mapper and 'coarse' in key) or \
-                                ((not self.coarse_mapper) and ('coarse' not in key)):
-                            val_grad = masked_c_grad[key]
-                            mask = masked_c_grad[key+'mask']
-                            val = val.to(device)
-                            val[mask] = val_grad
-                            c[key] = val
+            self.stage = 'color'
 
-                # print("---After assignment: %s seconds ---" % (time.time() - iter_time))
-
-                if self.coarse_mapper:
-                    self.stage = 'coarse'
-                elif joint_iter <= int(num_joint_iters*self.middle_iter_ratio):
-                    self.stage = 'middle'
-                elif joint_iter <= int(num_joint_iters*self.fine_iter_ratio):
-                    self.stage = 'fine'
-                else:
-                    self.stage = 'color'
-
-                optimizer.param_groups[0]['lr'] = cfg['mapping']['stage'][self.stage]['decoders_lr']*lr_factor
-                optimizer.param_groups[1]['lr'] = cfg['mapping']['stage'][self.stage]['coarse_lr']*lr_factor
-                optimizer.param_groups[2]['lr'] = cfg['mapping']['stage'][self.stage]['middle_lr']*lr_factor
-                optimizer.param_groups[3]['lr'] = cfg['mapping']['stage'][self.stage]['fine_lr']*lr_factor
-                optimizer.param_groups[4]['lr'] = cfg['mapping']['stage'][self.stage]['color_lr']*lr_factor
-                if self.BA:
-                    if self.stage == 'color':
-                        optimizer.param_groups[5]['lr'] = self.BA_cam_lr
-            else:
-                self.stage = 'color'
-                optimizer.param_groups[0]['lr'] = cfg['mapping']['imap_decoders_lr']
-                if self.BA:
-                    optimizer.param_groups[1]['lr'] = self.BA_cam_lr
+            optimizer.param_groups[0]['lr'] = cfg['mapping']['stage'][self.stage]['decoders_lr']*lr_factor
+            optimizer.param_groups[1]['lr'] = cfg['mapping']['stage'][self.stage]['fine_lr']*lr_factor
+            if self.BA:
+                if self.stage == 'color':
+                    optimizer.param_groups[2]['lr'] = self.BA_cam_lr
 
             if (not (idx == 0 and self.no_vis_on_first_frame)) and ('Demo' not in self.output) and (not self.aux_mapper):
                 self.visualizer.vis(
-                    idx, joint_iter, cur_gt_depth, cur_gt_color, cur_c2w, self.c, self.decoders, wandb_q)
+                    idx, joint_iter, cur_gt_depth, cur_gt_color, cur_c2w, self.c, self.planes_xy, self.planes_xz, self.planes_yz, self.decoders, wandb_q)
 
-            optimizer.zero_grad()
-            batch_rays_d_list = []
-            batch_rays_o_list = []
-            batch_gt_depth_list = []
-            batch_gt_color_list = []
+            with torch.autocast(device_type='cuda', dtype=torch.bfloat16):
+                gt_depths = []
+                gt_colors = []
+                c2ws = []
+                camera_tensor_id = 0
+                for frame in optimize_frame:
+                    if frame != -1:
+                        gt_depth = keyframe_dict[frame]['depth']
+                        gt_color = keyframe_dict[frame]['color']
+                        if self.BA and frame != oldest_frame:
+                            camera_tensor = camera_tensor_list[camera_tensor_id]
+                            camera_tensor_id += 1
+                            c2w = get_camera_from_tensor(camera_tensor)
+                        else:
+                            c2w = keyframe_dict[frame]['est_c2w']
 
-            camera_tensor_id = 0
-            for frame in optimize_frame:
-                if frame != -1:
-                    gt_depth = keyframe_dict[frame]['depth'].to(device)
-                    gt_color = keyframe_dict[frame]['color'].to(device)
-                    if self.BA and frame != oldest_frame:
-                        camera_tensor = camera_tensor_list[camera_tensor_id]
-                        camera_tensor_id += 1
-                        c2w = get_camera_from_tensor(camera_tensor)
                     else:
-                        c2w = keyframe_dict[frame]['est_c2w']
+                        gt_depth = cur_gt_depth
+                        gt_color = cur_gt_color
+                        if self.BA:
+                            camera_tensor = camera_tensor_list[camera_tensor_id]
+                            c2w = get_camera_from_tensor(camera_tensor)
+                        else:
+                            c2w = cur_c2w
 
-                else:
-                    gt_depth = cur_gt_depth.to(device)
-                    gt_color = cur_gt_color.to(device)
-                    if self.BA:
-                        camera_tensor = camera_tensor_list[camera_tensor_id]
-                        c2w = get_camera_from_tensor(camera_tensor)
-                    else:
-                        c2w = cur_c2w
+                    gt_depths.append(gt_depth)
+                    gt_colors.append(gt_color)
+                    c2ws.append(c2w)
+
+                gt_depths = torch.stack(gt_depths, dim=0)
+                gt_colors = torch.stack(gt_colors, dim=0)
+                c2ws = torch.stack(c2ws, dim=0)
 
                 batch_rays_o, batch_rays_d, batch_gt_depth, batch_gt_color = get_samples(
-                    0, H, 0, W, pixs_per_image, H, W, fx, fy, cx, cy, c2w, gt_depth, gt_color, self.device)
-                batch_rays_o_list.append(batch_rays_o.float())
-                batch_rays_d_list.append(batch_rays_d.float())
-                batch_gt_depth_list.append(batch_gt_depth.float())
-                batch_gt_color_list.append(batch_gt_color.float())
+                    0, H, 0, W, pixs_per_image, H, W, fx, fy, cx, cy, c2ws, gt_depths, gt_colors, self.device)
 
-            batch_rays_d = torch.cat(batch_rays_d_list)
-            batch_rays_o = torch.cat(batch_rays_o_list)
-            batch_gt_depth = torch.cat(batch_gt_depth_list)
-            batch_gt_color = torch.cat(batch_gt_color_list)
 
-            if self.nice:
-                # should pre-filter those out of bounding box depth value
-                with torch.no_grad():
-                    det_rays_o = batch_rays_o.clone().detach().unsqueeze(-1)  # (N, 3, 1)
-                    det_rays_d = batch_rays_d.clone().detach().unsqueeze(-1)  # (N, 3, 1)
-                    t = (self.bound.unsqueeze(0).to(
-                        device)-det_rays_o)/det_rays_d
-                    t, _ = torch.min(torch.max(t, dim=2)[0], dim=1)
-                    inside_mask = t >= batch_gt_depth
-                batch_rays_d = batch_rays_d[inside_mask]
-                batch_rays_o = batch_rays_o[inside_mask]
-                batch_gt_depth = batch_gt_depth[inside_mask]
-                batch_gt_color = batch_gt_color[inside_mask]
-            # ret = self.renderer.render_batch_ray(c, self.decoders, batch_rays_d,
-            #                                      batch_rays_o, device, self.stage, self.truncation,
-            #                                      gt_depth=None if self.coarse_mapper else batch_gt_depth)
-            # depth, uncertainty, color, entr, sdf, z_vals = ret
 
-            # if self.BA:
-            #     from tqdm import tqdm
-            #     for _ in tqdm(range(10000000)):
-            #         ret = self.renderer.no_render_batch_ray(c, self.decoders, batch_rays_d,
-            #                                      batch_rays_o, device, self.stage, self.truncation,
-            #                                      gt_depth=None if self.coarse_mapper else batch_gt_depth)
-            #         loss = ret[0].mean()
-            #         loss.backward(retain_graph=True)
+                # ret = self.renderer.render_batch_ray(c, self.decoders, batch_rays_d,
+                #                                      batch_rays_o, device, self.stage, self.truncation,
+                #                                      gt_depth=None if self.coarse_mapper else batch_gt_depth)
+                # depth, uncertainty, color, entr, sdf, z_vals = ret
 
-            ret = self.renderer.no_render_batch_ray(c, self.c_mask, self.decoders, batch_rays_d,
-                                                 batch_rays_o, device, self.stage, self.truncation,
-                                                 gt_depth=None if self.coarse_mapper else batch_gt_depth)
-            sdf, z_vals = ret
 
-            depth_mask = (batch_gt_depth > 0)
-            ################### OLD Loss ################
-            # loss = torch.abs(
-            #     batch_gt_depth[depth_mask]-depth[depth_mask]).sum()
-            # if ((not self.nice) or (self.stage == 'color')):
-            #     color_loss = torch.abs(batch_gt_color - color).sum()
-            #     weighted_color_loss = self.w_color_loss*color_loss
-            #     loss += weighted_color_loss
-            ##############################################
-            loss = self.sdf_loss(sdf[depth_mask], z_vals[depth_mask], batch_gt_depth[depth_mask])
+                ret = self.renderer.no_render_batch_ray(c, self.c_mask, self.planes_xy, self.planes_xz, self.planes_yz, self.decoders, batch_rays_d,
+                                                        batch_rays_o, device, self.stage, self.truncation,
+                                                        gt_depth=None if self.coarse_mapper else batch_gt_depth)
+                sdf, z_vals = ret
+
+                depth_mask = (batch_gt_depth > 0)
+                loss = self.sdf_loss(sdf[depth_mask], z_vals[depth_mask], batch_gt_depth[depth_mask])
+
             # loss = loss + 0.1 * torch.mean(torch.square(sdf[:, -1] + torch.ones_like(sdf[:, -1])))
             # loss = loss + 0.1 * torch.mean(torch.square(sdf + 0.25 * torch.ones_like(sdf)))
 
@@ -590,16 +484,6 @@ class Mapper(object):
             # loss += 0.5 * regulation_loss
 
 
-            # for imap*, it use volume density
-            # regulation = (not self.occupancy)
-            regulation = False
-            if regulation:
-                point_sigma = self.renderer.regulation(
-                    c, self.decoders, batch_rays_d, batch_rays_o, batch_gt_depth, device, self.stage)
-                regulation_loss = torch.abs(1. - torch.exp(-F.softplus(20 * point_sigma))).sum()
-                print('loss: ', loss.item(), 'reg loss: ', regulation_loss.item())
-                loss += 0.0005*regulation_loss
-
             # if idx == self.n_img - 1:
             #     print('stage: ', self.stage)
             #     for key, val in c.items():
@@ -611,7 +495,7 @@ class Mapper(object):
             #             tv3 = torch.pow((val[..., 1:, :, :] - val[...,:-1, :, :]),2).sum()
             #             tv_loss = tv1 + tv2 + tv3
             #             print('tv loss: ', tv_loss.item())
-                                
+
             # regulation_loss = entr.mean()
             # print('loss: ', loss.item(), 'reg loss: ', regulation_loss.item())
             # loss += 5 * regulation_loss
@@ -635,19 +519,19 @@ class Mapper(object):
             #     # print('loss: ', loss, 'tv loss: ', tv_loss.item())
             #     loss += 0.01 * tv_loss
 
-            pooling = {'grid_middle': torch.nn.AvgPool3d(3, stride=1, padding=1, count_include_pad=False),
-                       'grid_fine': torch.nn.AvgPool3d(3, stride=1, padding=1, count_include_pad=False)
-            }
-            for key in ['grid_middle', 'grid_fine']:
-            # for key in ['grid_middle']:
-                tv_loss = (torch.pow(c[key] - pooling[key](c[key].detach()), 2) * self.c_mask[key]).sum() / (self.c_mask[key].sum() + 1e-6)
-
-                # p3d = (1, 1, 1, 1, 1, 1)
-                # c_padded = F.pad(c[key].detach(), p3d, "constant", -1)
-                # # mask_padded = F.pad(self.c_mask[key], p3d, "constant", 0)
-                # tv_loss = (torch.pow(c[key] - pooling[key](c_padded), 2) * self.c_mask[key]).sum() / (self.c_mask[key].sum() + 1e-6)
-
-                loss += 0.5 * tv_loss
+            # pooling = {'grid_middle': torch.nn.AvgPool3d(3, stride=1, padding=1, count_include_pad=False),
+            #            'grid_fine': torch.nn.AvgPool3d(3, stride=1, padding=1, count_include_pad=False)
+            #            }
+            # for key in ['grid_middle', 'grid_fine']:
+            #     # for key in ['grid_middle']:
+            #     tv_loss = (torch.pow(c[key] - pooling[key](c[key].detach()), 2) * self.c_mask[key]).sum() / (self.c_mask[key].sum() + 1e-6)
+            #
+            #     # p3d = (1, 1, 1, 1, 1, 1)
+            #     # c_padded = F.pad(c[key].detach(), p3d, "constant", -1)
+            #     # # mask_padded = F.pad(self.c_mask[key], p3d, "constant", 0)
+            #     # tv_loss = (torch.pow(c[key] - pooling[key](c_padded), 2) * self.c_mask[key]).sum() / (self.c_mask[key].sum() + 1e-6)
+            #
+            #     loss += 0.5 * tv_loss
 
             #### random negs
             # if idx == 0:
@@ -660,25 +544,10 @@ class Mapper(object):
             #     rnd_loss = ((rnd_sdf + torch.ones_like(rnd_sdf)) ** 2).mean()
             #     loss = loss + 0 * rnd_loss
 
+            optimizer.zero_grad()
             loss.backward(retain_graph=False)
             optimizer.step()
-            if not self.nice:
-                # for imap*
-                scheduler.step()
-            optimizer.zero_grad()
 
-            # put selected and updated features back to the grid
-            if self.nice and self.frustum_feature_selection:
-                for key, val in c.items():
-                    if (self.coarse_mapper and 'coarse' in key) or \
-                            ((not self.coarse_mapper) and ('coarse' not in key)):
-                        val_grad = masked_c_grad[key]
-                        mask = masked_c_grad[key+'mask']
-                        val = val.detach()
-                        val[mask] = val_grad.clone().detach()
-                        c[key] = val
-
-            # print('end of joint:', time.time() - start_time_joint)
 
         if self.BA:
             # put the updated camera poses back
@@ -704,8 +573,10 @@ class Mapper(object):
     def run(self, wandb_q):
         cfg = self.cfg
         idx, gt_color, gt_depth, gt_c2w = self.frame_reader[0]
+        data_iter = iter(self.frame_loader)
 
-        self.estimate_c2w_list[0] = gt_c2w.cpu()
+        self.estimate_c2w_list[0] = gt_c2w
+
         init = True
         prev_idx = -1
         while (1):
@@ -736,7 +607,9 @@ class Mapper(object):
                 print(prefix+"Mapping Frame ", idx.item())
                 print(Style.RESET_ALL)
 
-            _, gt_color, gt_depth, gt_c2w = self.frame_reader[idx]
+            # _, gt_color, gt_depth, gt_c2w = self.frame_reader[idx]
+            _, gt_color, gt_depth, gt_c2w = next(data_iter)
+            gt_color, gt_depth, gt_c2w = gt_color.squeeze(0), gt_depth.squeeze(0), gt_c2w.squeeze(0)
 
             if not init:
                 lr_factor = cfg['mapping']['lr_factor']
@@ -762,7 +635,7 @@ class Mapper(object):
                 lr_factor = cfg['mapping']['lr_first_factor']
                 num_joint_iters = cfg['mapping']['iters_first']
 
-            cur_c2w = self.estimate_c2w_list[idx].to(self.device)
+            cur_c2w = self.estimate_c2w_list[idx]
             num_joint_iters = num_joint_iters//outer_joint_iters
             for outer_joint_iter in range(outer_joint_iters):
 
@@ -771,6 +644,7 @@ class Mapper(object):
 
                 _ = self.optimize_map(num_joint_iters, lr_factor, idx, gt_color, gt_depth,
                                       gt_c2w, self.keyframe_dict, self.keyframe_list, cur_c2w=cur_c2w, wandb_q=wandb_q)
+
                 if self.BA:
                     cur_c2w = _
                     self.estimate_c2w_list[idx] = cur_c2w
@@ -808,7 +682,7 @@ class Mapper(object):
 
                 if (idx % self.mesh_freq == 0) and (not (idx == 0 and self.no_mesh_on_first_frame)):
                     mesh_out_file = f'{self.output}/mesh/{idx:05d}_mesh.ply'
-                    self.mesher.get_mesh(mesh_out_file, self.c, self.decoders, self.keyframe_dict, self.estimate_c2w_list,
+                    self.mesher.get_mesh(mesh_out_file, self.c, self.planes_xy, self.planes_xz, self.planes_yz, self.decoders, self.keyframe_dict, self.estimate_c2w_list,
                                          idx,  self.device, show_forecast=self.mesh_coarse_level,
                                          clean_mesh=self.clean_mesh, get_mask_use_all_frames=False)
 
@@ -822,9 +696,18 @@ class Mapper(object):
                     
                     if self.eval_rec:
                         mesh_out_file = f'{self.output}/mesh/final_mesh_eval_rec.ply'
-                        self.mesher.get_mesh(mesh_out_file, self.c, self.decoders, self.keyframe_dict,
+                        self.mesher.get_mesh(mesh_out_file, self.c, self.planes_xy, self.planes_xz, self.planes_yz, self.decoders, self.keyframe_dict,
                                              self.estimate_c2w_list, idx, self.device, show_forecast=False,
                                              clean_mesh=self.clean_mesh, get_mask_use_all_frames=True)
+
+                        cull_mesh(mesh_out_file, self.cfg, self.args, self.device)
+
+                        # from zipfile import ZipFile
+                        # import zipfile
+                        # zip_file = f'{self.output}/mesh/final_mesh_eval_rec.zip'
+                        # with ZipFile(zip_file, 'w') as zipf:
+                        #     zipf.write(mesh_out_file, compression=zipfile.ZIP_DEFLATED)
+
                     break
 
             if idx == self.n_img-1:

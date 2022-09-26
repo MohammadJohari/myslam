@@ -6,16 +6,33 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 from src.common import as_intrinsics_matrix
-from torch.utils.data import Dataset
+from torch.utils.data import Dataset, Sampler
 
+class SeqSampler(Sampler):
+    r"""Samples elements sequentially, always in the same order.
+
+    Args:
+        data_source (Dataset): dataset to sample from
+    """
+
+    def __init__(self, n_samples, step, include_last=True):
+        self.n_samples = n_samples
+        self.step = step
+        self.include_last = include_last
+    def __iter__(self):
+        if self.include_last:
+            return iter(list(range(0, self.n_samples, self.step)) + [self.n_samples - 1])
+        else:
+            return iter(range(0, self.n_samples, self.step))
+
+    def __len__(self) -> int:
+        return self.n_samples
 
 def readEXR_onlydepth(filename):
     """
     Read depth data from EXR image file.
-
     Args:
         filename (str): File path.
-
     Returns:
         Y (numpy.array): Depth buffer in float32 format.
     """
@@ -46,6 +63,30 @@ def readEXR_onlydepth(filename):
 
 def get_dataset(cfg, args, scale, device='cuda:0'):
     return dataset_dict[cfg['dataset']](cfg, args, scale, device=device)
+
+class RayDataset(Dataset):
+    def __init__(self, cfg, args, h_edge, w_edge, ray_size, device='cuda:0'):
+        super(RayDataset, self).__init__()
+        self.device = device
+        self.h_edge = h_edge
+        self.w_edge = w_edge
+        self.ray_size = ray_size
+
+        self.H, self.W, self.fx, self.fy, self.cx, self.cy = cfg['cam']['H'], cfg['cam'][
+            'W'], cfg['cam']['fx'], cfg['cam']['fy'], cfg['cam']['cx'], cfg['cam']['cy']
+
+
+    def __len__(self):
+        return 100000
+
+    def __getitem__(self, index):
+        u = torch.randint(low=self.w_edge, high=self.W - self.w_edge, size=[self.ray_size])
+        v = torch.randint(low=self.h_edge, high=self.H - self.h_edge, size=[self.ray_size])
+
+        dirs = torch.stack([(u - self.cx) / self.fx, -(v - self.cy) / self.fy, -torch.ones_like(u)], -1)
+        dirs = dirs.reshape(-1, 1, 3)
+
+        return u.to(self.device, non_blocking=True), v.to(self.device, non_blocking=True), dirs.to(self.device, non_blocking=True)
 
 
 class BaseDataset(Dataset):
@@ -110,7 +151,7 @@ class BaseDataset(Dataset):
             depth_data = depth_data[edge:-edge, edge:-edge]
         pose = self.poses[index]
         pose[:3, 3] *= self.scale
-        return index, color_data.to(self.device), depth_data.to(self.device), pose.to(self.device)
+        return index, color_data.to(self.device, non_blocking=True), depth_data.to(self.device, non_blocking=True), pose.to(self.device, non_blocking=True)
 
 
 class Replica(BaseDataset):
@@ -122,7 +163,6 @@ class Replica(BaseDataset):
         self.depth_paths = sorted(
             glob.glob(f'{self.input_folder}/results/depth*.png'))
         self.n_img = len(self.color_paths)
-        # self.n_img = 40
         self.load_poses(f'{self.input_folder}/traj.txt')
 
     def load_poses(self, path):

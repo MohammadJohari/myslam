@@ -3,7 +3,7 @@ sync_method: strict
 scale: 1
 verbose: True
 occupancy: False
-low_gpu_mem: True
+low_gpu_mem: False
 grid_len:
   coarse: 2 
   middle: 0.24
@@ -17,7 +17,7 @@ meshing:
   level_set: 0
   resolution: 0.01 # change to 512 for higher resolution geometry
   eval_rec: False
-  clean_mesh: True
+  clean_mesh: False
   depth_test: False
   mesh_coarse_level: False
   clean_mesh_bound_scale: 1.02
@@ -36,7 +36,7 @@ tracking:
   seperate_LR: False
   const_speed_assumption: True
   no_vis_on_first_frame: True
-  gt_camera: True
+  gt_camera: False
   lr: 0.001
   pixels: 200
   iters: 10
@@ -61,7 +61,7 @@ mapping:
   mapping_window_size: 5
   w_color_loss: 0.01
   frustum_feature_selection: False
-  keyframe_selection_method: 'overlap'
+  keyframe_selection_method: 'global'
   save_selected_keyframes_info: False
   lr_first_factor: 5
   lr_factor: 1
@@ -109,8 +109,8 @@ cam:
   png_depth_scale: 6553.5 #for depth image in png format
   crop_edge: 0
 rendering:
-  N_samples: 32
-  N_surface: 4
+  N_samples: 16
+  N_surface: 8
   N_importance: 0
   lindisp: False
   perturb: 1.0

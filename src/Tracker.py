@@ -42,6 +42,9 @@ class Tracker(object):
         self.shared_decoders = slam.shared_decoders
         self.estimate_c2w_list = slam.estimate_c2w_list
         self.truncation = slam.truncation
+        self.shared_planes_xy = slam.shared_planes_xy
+        self.shared_planes_xz = slam.shared_planes_xz
+        self.shared_planes_yz = slam.shared_planes_yz
 
         self.cam_lr = cfg['tracking']['lr']
         self.device = cfg['tracking']['device']
@@ -57,7 +60,7 @@ class Tracker(object):
         self.const_speed_assumption = cfg['tracking']['const_speed_assumption']
 
         self.every_frame = cfg['mapping']['every_frame']
-        self.no_vis_on_first_frame = cfg['mapping']['no_vis_on_first_frame']
+        self.no_vis_on_first_frame = cfg['tracking']['no_vis_on_first_frame']
 
         self.prev_mapping_idx = -1
         self.frame_reader = get_dataset(
@@ -69,6 +72,13 @@ class Tracker(object):
                                      vis_dir=os.path.join(self.output, 'vis' if 'Demo' in self.output else 'tracking_vis'),
                                      renderer=self.renderer, truncation=self.truncation, verbose=self.verbose, device=self.device)
         self.H, self.W, self.fx, self.fy, self.cx, self.cy = slam.H, slam.W, slam.fx, slam.fy, slam.cx, slam.cy
+
+        self.decoders = copy.deepcopy(self.shared_decoders)
+        self.planes_xy = copy.deepcopy(self.shared_planes_xy)
+        self.planes_xz = copy.deepcopy(self.shared_planes_xz)
+        self.planes_yz = copy.deepcopy(self.shared_planes_yz)
+        for p in self.decoders.parameters():
+            p.requires_grad_(False)
 
     # def sdf_loss(self, sdf, z_vals, gt_depth):
     #     front_mask = torch.where(z_vals < (gt_depth[:, None] - self.truncation), torch.ones_like(z_vals), torch.zeros_like(z_vals)).bool()
@@ -118,43 +128,38 @@ class Tracker(object):
         device = self.device
         H, W, fx, fy, cx, cy = self.H, self.W, self.fx, self.fy, self.cx, self.cy
         optimizer.zero_grad()
-        c2w = get_camera_from_tensor(camera_tensor)
-        Wedge = self.ignore_edge_W
-        Hedge = self.ignore_edge_H
-        batch_rays_o, batch_rays_d, batch_gt_depth, batch_gt_color = get_samples(
-            Hedge, H-Hedge, Wedge, W-Wedge, batch_size, H, W, fx, fy, cx, cy, c2w, gt_depth, gt_color, self.device)
-        if self.nice:
-            # should pre-filter those out of bounding box depth value
-            with torch.no_grad():
-                det_rays_o = batch_rays_o.clone().detach().unsqueeze(-1)  # (N, 3, 1)
-                det_rays_d = batch_rays_d.clone().detach().unsqueeze(-1)  # (N, 3, 1)
-                t = (self.bound.unsqueeze(0).to(device)-det_rays_o)/det_rays_d
-                t, _ = torch.min(torch.max(t, dim=2)[0], dim=1)
-                inside_mask = t >= batch_gt_depth
-            batch_rays_d = batch_rays_d[inside_mask]
-            batch_rays_o = batch_rays_o[inside_mask]
-            batch_gt_depth = batch_gt_depth[inside_mask]
-            batch_gt_color = batch_gt_color[inside_mask]
+        for _ in tqdm(range(100000)):
+            c2w = get_camera_from_tensor(camera_tensor)
+            Wedge = self.ignore_edge_W
+            Hedge = self.ignore_edge_H
+            batch_rays_o, batch_rays_d, batch_gt_depth, batch_gt_color = get_samples(
+                Hedge, H-Hedge, Wedge, W-Wedge, batch_size, H, W, fx, fy, cx, cy, c2w.unsqueeze(0), gt_depth.unsqueeze(0), gt_color.unsqueeze(0), self.device)
 
-        ret = self.renderer.render_batch_ray(
-            self.c, self.decoders, batch_rays_d, batch_rays_o,  self.device, stage='color', truncation=self.truncation, gt_depth=batch_gt_depth)
-        depth, uncertainty, color, _, sdf, z_vals = ret
+            ret = self.renderer.no_render_batch_ray(self.c, None, self.planes_xy, self.planes_xz, self.planes_yz,
+                                                    self.decoders, batch_rays_d,
+                                                    batch_rays_o, self.device, 'color', self.truncation,
+                                                    gt_depth=batch_gt_depth)
+        sdf, z_vals = ret
 
-        uncertainty = uncertainty.detach()
-        if self.handle_dynamic:
-            tmp = torch.abs(batch_gt_depth-depth)/torch.sqrt(uncertainty+1e-10)
-            mask = (tmp < 10*tmp.median()) & (batch_gt_depth > 0)
-        else:
-            mask = batch_gt_depth > 0
+        # ret = self.renderer.render_batch_ray(
+        #     self.c, self.decoders, batch_rays_d, batch_rays_o,  self.device, stage='color', truncation=self.truncation, gt_depth=batch_gt_depth)
+        # depth, uncertainty, color, _, sdf, z_vals = ret
 
-        loss = (torch.abs(batch_gt_depth-depth) /
-                torch.sqrt(uncertainty+1e-10))[mask].sum()
+        # uncertainty = uncertainty.detach()
+        # if self.handle_dynamic:
+        #     tmp = torch.abs(batch_gt_depth-depth)/torch.sqrt(uncertainty+1e-10)
+        #     mask = (tmp < 10*tmp.median()) & (batch_gt_depth > 0)
+        # else:
+        #     mask = batch_gt_depth > 0
+
+        # loss = (torch.abs(batch_gt_depth-depth) /
+        #         torch.sqrt(uncertainty+1e-10))[mask].sum()
 
         # loss = self.sdf_loss(sdf[mask], z_vals[mask], batch_gt_depth[mask])
 
-        # depth_mask = batch_gt_depth > 0
-        good_mask = torch.abs(batch_gt_depth - depth) < 0.10
-        depth_mask = (batch_gt_depth > 0) & good_mask
+        depth_mask = batch_gt_depth > 0
+        # good_mask = torch.abs(batch_gt_depth - depth) < 0.10
+        # depth_mask = (batch_gt_depth > 0) & good_mask
         loss = self.sdf_loss(sdf[depth_mask], z_vals[depth_mask], batch_gt_depth[depth_mask])
 
         # if self.use_color_in_tracking:
@@ -175,15 +180,21 @@ class Tracker(object):
         if self.mapping_idx[0] != self.prev_mapping_idx:
             if self.verbose:
                 print('Tracking: update the parameters from mapping')
-            self.decoders = copy.deepcopy(self.shared_decoders).to(self.device)
-            for key, val in self.shared_c.items():
-                val = val.clone().to(self.device)
-                self.c[key] = val
+
+            self.decoders.load_state_dict(self.shared_decoders.state_dict())
+
+            for planes, self_planes in zip(
+                    [self.shared_planes_xy, self.shared_planes_xz, self.shared_planes_yz],
+                    [self.planes_xy, self.planes_xz, self.planes_yz]):
+                for i, plane in enumerate(planes):
+                    self_planes[i] = plane.detach()
+
             self.prev_mapping_idx = self.mapping_idx[0].clone()
 
     def run(self, wandb_q):
         device = self.device
         self.c = {}
+
         if self.verbose:
             pbar = self.frame_loader
         else:
@@ -201,6 +212,7 @@ class Tracker(object):
             gt_depth = gt_depth[0]
             gt_color = gt_color[0]
             gt_c2w = gt_c2w[0]
+
 
             if self.sync_method == 'strict':
                 # strictly mapping and then tracking
@@ -236,15 +248,14 @@ class Tracker(object):
             else:
                 gt_camera_tensor = get_tensor_from_camera(gt_c2w)
                 if self.const_speed_assumption and idx-2 >= 0:
-                    pre_c2w = pre_c2w.float()
                     delta = pre_c2w@self.estimate_c2w_list[idx-2].to(
                         device).float().inverse()
                     estimated_new_cam_c2w = delta@pre_c2w
                 else:
                     estimated_new_cam_c2w = pre_c2w
 
-                camera_tensor = get_tensor_from_camera(
-                    estimated_new_cam_c2w.detach())
+                camera_tensor = get_tensor_from_camera(estimated_new_cam_c2w.detach())
+
                 if self.seperate_LR:
                     camera_tensor = camera_tensor.to(device).detach()
                     T = camera_tensor[-3:]
@@ -276,11 +287,10 @@ class Tracker(object):
                     if self.seperate_LR:
                         camera_tensor = torch.cat([quad, T], 0).to(self.device)
 
-                    self.visualizer.vis(
-                        idx, cam_iter, gt_depth, gt_color, camera_tensor, self.c, self.decoders, wandb_q)
+                    self.visualizer.vis(idx, cam_iter, gt_depth, gt_color, camera_tensor, self.c, self.planes_xy, self.planes_xz, self.planes_yz, self.decoders, wandb_q)
 
-                    loss = self.optimize_cam_in_batch(
-                        camera_tensor, gt_color, gt_depth, self.tracking_pixels, optimizer_camera)
+                    for _ in tqdm(range(10000)):
+                        loss = self.optimize_cam_in_batch(camera_tensor, gt_color, gt_depth, self.tracking_pixels, optimizer_camera)
 
                     if cam_iter == 0:
                         initial_loss = loss
@@ -296,10 +306,10 @@ class Tracker(object):
 
                             wandb_q.put(({"Tracking Loss (Before)": initial_loss, "Tracking Loss (After)": loss}, idx))
                             wandb_q.put(({
-                                "Tracking Error (Before)": initial_loss_camera_tensor,
-                                "Tracking Error (After)": loss_camera_tensor,
-                                "Tracking Error (Diff)": initial_loss_camera_tensor - loss_camera_tensor
-                                }, idx))
+                                             "Tracking Error (Before)": initial_loss_camera_tensor,
+                                             "Tracking Error (After)": loss_camera_tensor,
+                                             "Tracking Error (Diff)": initial_loss_camera_tensor - loss_camera_tensor
+                                         }, idx))
 
                     if loss < current_min_loss:
                         current_min_loss = loss
@@ -309,7 +319,7 @@ class Tracker(object):
                 c2w = get_camera_from_tensor(
                     candidate_cam_tensor.clone().detach())
                 c2w = torch.cat([c2w, bottom], dim=0)
-            self.estimate_c2w_list[idx] = c2w.clone().cpu()
+            self.estimate_c2w_list[idx] = c2w.clone()
             self.gt_c2w_list[idx] = gt_c2w.clone().cpu()
             pre_c2w = c2w.clone()
             self.idx[0] = idx

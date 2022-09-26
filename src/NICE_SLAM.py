@@ -54,7 +54,7 @@ class NICE_SLAM():
 
         self.load_bound(cfg)
         if self.nice:
-            self.load_pretrain(cfg)
+            # self.load_pretrain(cfg)
             self.grid_init(cfg)
         else:
             self.shared_c = {}
@@ -67,7 +67,7 @@ class NICE_SLAM():
 
         self.frame_reader = get_dataset(cfg, args, self.scale)
         self.n_img = len(self.frame_reader)
-        self.estimate_c2w_list = torch.zeros((self.n_img, 4, 4))
+        self.estimate_c2w_list = torch.zeros((self.n_img, 4, 4), device=self.cfg['mapping']['device'])
         self.estimate_c2w_list.share_memory_()
 
         self.gt_c2w_list = torch.zeros((self.n_img, 4, 4))
@@ -97,12 +97,18 @@ class NICE_SLAM():
             val.share_memory_()
             self.shared_c_mask[key] = val
 
+        for shared_planes in [self.shared_planes_xy, self.shared_planes_xz, self.shared_planes_yz]:
+            for i, plane in enumerate(shared_planes):
+                plane = plane.to(self.cfg['mapping']['device'])
+                plane.share_memory_()
+                shared_planes[i] = plane
+
         self.shared_decoders = self.shared_decoders.to(
             self.cfg['mapping']['device'])
         self.shared_decoders.share_memory()
         
         ## New params
-        self.truncation = 0.10
+        self.truncation = 0.08
 
         self.renderer = Renderer(cfg, args, self)
         self.mesher = Mesher(cfg, args, self)
@@ -160,18 +166,17 @@ class NICE_SLAM():
             cfg (dict): parsed config dict.
         """
         # scale the bound if there is a global scaling factor
-        self.bound = torch.from_numpy(
-            np.array(cfg['mapping']['bound'])*self.scale)
+        self.bound = torch.from_numpy(np.array(cfg['mapping']['bound'])*self.scale).float()
         bound_divisable = cfg['grid_len']['bound_divisable']
         # enlarge the bound a bit to allow it divisable by bound_divisable
         self.bound[:, 1] = (((self.bound[:, 1]-self.bound[:, 0]) /
                             bound_divisable).int()+1)*bound_divisable+self.bound[:, 0]
         if self.nice:
             self.shared_decoders.bound = self.bound
-            self.shared_decoders.middle_decoder.bound = self.bound
-            self.shared_decoders.fine_decoder.bound = self.bound
-            self.shared_decoders.color_decoder.bound = self.bound
-            self.shared_decoders.sdf_decoder.bound = self.bound
+            # self.shared_decoders.middle_decoder.bound = self.bound
+            # self.shared_decoders.fine_decoder.bound = self.bound
+            # self.shared_decoders.color_decoder.bound = self.bound
+            # self.shared_decoders.sdf_decoder.bound = self.bound
             if self.coarse:
                 self.shared_decoders.coarse_decoder.bound = self.bound*self.coarse_bound_enlarge
 
@@ -228,9 +233,26 @@ class NICE_SLAM():
         c = {}
         c_aux = {}
         c_mask = {}
+
         c_dim = cfg['model']['c_dim']
         o_dim = 8
         xyz_len = self.bound[:, 1]-self.bound[:, 0]
+
+        ####### Initializing Planes ############
+        planes_xy = []
+        planes_xz = []
+        planes_yz = []
+        planes_res = [0.24, 0.06]
+        # planes_res = [0.64, 0.32]
+        planes_dim = c_dim
+        for grid_len in planes_res:
+            grid_shape = list(map(int, (xyz_len / grid_len).tolist()))
+            grid_shape[0], grid_shape[2] = grid_shape[2], grid_shape[0]
+            planes_xy.append(torch.empty([1, planes_dim, *grid_shape[1:]]).normal_(mean=0, std=0.01))
+            planes_xz.append(torch.empty([1, planes_dim, grid_shape[0], grid_shape[2]]).normal_(mean=0, std=0.01))
+            planes_yz.append(torch.empty([1, planes_dim, *grid_shape[:2]]).normal_(mean=0, std=0.01))
+
+        ########################################
 
         if self.coarse:
             coarse_key = 'grid_coarse'
@@ -249,7 +271,7 @@ class NICE_SLAM():
         val_shape = [1, o_dim, *middle_val_shape]
         middle_val = torch.zeros(val_shape).normal_(mean=0, std=0.01)
         # middle_val = -0.5 * torch.ones(val_shape)
-        print('Mid Shape: ', val_shape)
+        # print('Mid Shape: ', val_shape)
 
         c[middle_key] = middle_val
         # c_aux[middle_key] = middle_val.clone()
@@ -262,7 +284,7 @@ class NICE_SLAM():
         val_shape = [1, o_dim, *fine_val_shape]
         fine_val = torch.zeros(val_shape).normal_(mean=0, std=0.01)
         c[fine_key] = fine_val
-        print('Fine Shape: ', val_shape)
+        # print('Fine Shape: ', val_shape)
 
         # c_aux[fine_key] = fine_val.clone()
         c_mask[fine_key] = torch.ones([1, 1, *val_shape[2:]])
@@ -278,6 +300,9 @@ class NICE_SLAM():
         self.shared_c = c
         # self.shared_c_aux = c_aux
         self.shared_c_mask = c_mask
+        self.shared_planes_xy = planes_xy
+        self.shared_planes_xz = planes_xz
+        self.shared_planes_yz = planes_yz
 
     def tracking(self, rank, wandb_q):
         """
