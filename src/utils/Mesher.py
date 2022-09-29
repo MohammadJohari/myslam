@@ -306,7 +306,7 @@ class Mesher(object):
         return_mesh = trimesh.Trimesh(vertices=points, faces=faces)
         return return_mesh
 
-    def eval_points(self, p, planes_xy, planes_xz, planes_yz, decoders, c=None, stage='color', device='cuda:0'):
+    def eval_points(self, p, all_planes, decoders, stage='color', device='cuda:0'):
         """
         Evaluates the occupancy and/or color value for the points.
 
@@ -333,7 +333,7 @@ class Mesher(object):
 
             pi = pi.unsqueeze(0)
             if self.nice:
-                ret, fine_raw = decoders(pi, torch.zeros_like(pi), c_grid=c, planes_xy=planes_xy, planes_xz=planes_xz, planes_yz=planes_yz, stage=stage)
+                ret, fine_raw = decoders(pi, all_planes=all_planes, stage=stage)
                 # untouched = fine_raw.abs().sum(dim=-1) != 0
                 # untouched = (fine_raw == 0.01).float().mean(dim=-1) != 1
                 # mask &= untouched
@@ -383,8 +383,7 @@ class Mesher(object):
 
     def get_mesh(self,
                  mesh_out_file,
-                 c,
-                 planes_xy, planes_xz, planes_yz,
+                 all_planes,
                  decoders,
                  keyframe_dict,
                  estimate_c2w_list,
@@ -448,7 +447,7 @@ class Mesher(object):
                         torch.split(seen_points, self.points_batch_size,
                                     dim=0)):
                     z_seen.append(
-                        self.eval_points(pnts, planes_xy, planes_xz, planes_yz, decoders, c, 'fine',
+                        self.eval_points(pnts, all_planes, decoders, 'fine',
                                          device).cpu().numpy()[:, -1])
                 z_seen = np.concatenate(z_seen, axis=0)
                 print('Evaling time: ', time.time() - start_time)
@@ -468,7 +467,7 @@ class Mesher(object):
                     mask.append(mesh_bound.contains(pnts.cpu().numpy()))
                 mask = np.concatenate(mask, axis=0)
                 for i, pnts in enumerate(torch.split(points, self.points_batch_size, dim=0)):
-                    z.append(self.eval_points(pnts, planes_xy, planes_xz, planes_yz, decoders, c, 'fine',
+                    z.append(self.eval_points(pnts, all_planes, decoders, 'fine',
                                               device).cpu().numpy()[:, -1])
 
                 z = np.concatenate(z, axis=0)
@@ -564,7 +563,7 @@ class Mesher(object):
                     for i, pnts in enumerate(
                             torch.split(points, self.points_batch_size, dim=0)):
                         z_color = self.eval_points(
-                            pnts.to(device).float(), planes_xy, planes_xz, planes_yz, decoders, c, 'color',
+                            pnts.to(device).float(), all_planes, decoders, 'color',
                             device).cpu()[..., :3]
                         z.append(z_color)
                     z = torch.cat(z, axis=0)
@@ -593,7 +592,7 @@ class Mesher(object):
                         rays_o_batch = rays_o[i:i+batch_size]
                         gt_depth_batch = gt_depth[i:i+batch_size]
                         depth, uncertainty, color, _, _, _ = self.renderer.render_batch_ray(
-                            c, decoders, rays_d_batch, rays_o_batch, device, 
+                            decoders, rays_d_batch, rays_o_batch, device,
                             stage='color', gt_depth=gt_depth_batch)
                         color_list.append(color)
                     color = torch.cat(color_list, dim=0)

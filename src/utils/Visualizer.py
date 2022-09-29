@@ -2,7 +2,7 @@ import os
 import torch
 import numpy as np
 import matplotlib.pyplot as plt
-from src.common import get_camera_from_tensor
+from src.common import matrix_to_pose6d
 
 
 class Visualizer(object):
@@ -22,8 +22,7 @@ class Visualizer(object):
         self.truncation = truncation
         os.makedirs(f'{vis_dir}', exist_ok=True)
 
-    def vis(self, idx, iter, gt_depth, gt_color, c2w_or_camera_tensor, c, planes_xy, planes_xz, planes_yz,
-            decoders, wandb_q):
+    def vis(self, idx, iter, gt_depth, gt_color, c2w_or_camera_tensor, all_planes, decoders, wandb_q):
         """
         Visualization of depth, color images and save to file.
 
@@ -39,21 +38,22 @@ class Visualizer(object):
         """
         with torch.no_grad():
             if (idx % self.freq == 0) and (iter % self.inside_freq == 0):
-                gt_depth_np = gt_depth.cpu().numpy()
-                gt_color_np = gt_color.cpu().numpy()
+                gt_depth_np = gt_depth.squeeze(0).cpu().numpy()
+                gt_color_np = gt_color.squeeze(0).cpu().numpy()
+
                 if len(c2w_or_camera_tensor.shape) == 1:
-                    bottom = torch.from_numpy(
-                        np.array([0, 0, 0, 1.]).reshape([1, 4])).type(
-                            torch.float32).to(self.device)
-                    c2w = get_camera_from_tensor(
-                        c2w_or_camera_tensor.clone().detach())
-                    c2w = torch.cat([c2w, bottom], dim=0)
+                    c2w = matrix_to_pose6d(c2w_or_camera_tensor.detach()).squeeze()
+                    # bottom = torch.from_numpy(
+                    #     np.array([0, 0, 0, 1.]).reshape([1, 4])).type(
+                    #         torch.float32).to(self.device)
+                    # c2w = get_camera_from_tensor(
+                    #     c2w_or_camera_tensor.clone().detach())
+                    # c2w = torch.cat([c2w, bottom], dim=0)
                 else:
-                    c2w = c2w_or_camera_tensor
+                    c2w = c2w_or_camera_tensor.squeeze().detach()
 
                 depth, uncertainty, color = self.renderer.render_img(
-                    c,
-                    planes_xy, planes_xz, planes_yz,
+                    all_planes,
                     decoders,
                     c2w,
                     self.truncation,
@@ -76,6 +76,7 @@ class Visualizer(object):
                 fig, axs = plt.subplots(2, 3)
                 fig.tight_layout()
                 max_depth = np.max(gt_depth_np)
+
                 axs[0, 0].imshow(gt_depth_np, cmap="plasma",
                                  vmin=0, vmax=max_depth)
                 axs[0, 0].set_title('Input Depth')
@@ -109,6 +110,7 @@ class Visualizer(object):
                 plt.subplots_adjust(wspace=0, hspace=0)
                 plt.savefig(
                     f'{self.vis_dir}/{idx:05d}_{iter:04d}.jpg', bbox_inches='tight', pad_inches=0.2, dpi=300)
+                plt.cla()
                 plt.clf()
 
                 if self.verbose:

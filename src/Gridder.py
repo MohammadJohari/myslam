@@ -29,7 +29,6 @@ class Gridder(object):
 
         self.idx = slam.idx
         self.truncation = slam.truncation
-        self.c = slam.shared_c
 
         self.scale = cfg['scale']
         self.device = cfg['mapping']['device']

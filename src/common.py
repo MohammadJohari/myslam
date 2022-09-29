@@ -1,6 +1,7 @@
 import numpy as np
 import torch
 import torch.nn.functional as F
+from pytorch3d.transforms import matrix_to_quaternion, quaternion_to_axis_angle, quaternion_to_matrix
 
 
 def as_intrinsics_matrix(intrinsics):
@@ -289,8 +290,51 @@ def get_tensor_from_camera(RT, Tquad=False):
         tensor = tensor.to(gpu_id)
     return tensor
 
+def axis_angle_to_matrix(data):
+    batch_dims = data.shape[:-1]
 
-def raw2outputs_nerf_color(raw, z_vals, rays_d, truncation, occupancy=False, device='cuda:0'):
+    theta = torch.norm(data, dim=-1, keepdim=True)
+    omega = data / theta
+
+    omega1 = omega[...,0:1]
+    omega2 = omega[...,1:2]
+    omega3 = omega[...,2:3]
+    zeros = torch.zeros_like(omega1)
+
+    K = torch.concat([torch.concat([zeros, -omega3, omega2], dim=-1)[...,None,:],
+                      torch.concat([omega3, zeros, -omega1], dim=-1)[...,None,:],
+                      torch.concat([-omega2, omega1, zeros], dim=-1)[...,None,:]], dim=-2)
+    I = torch.eye(3, device=data.device).expand(*batch_dims,3,3)
+
+    return I + torch.sin(theta).unsqueeze(-1) * K + (1. - torch.cos(theta).unsqueeze(-1)) * (K @ K)
+
+def matrix_to_axis_angle(rot):
+    """
+    :param rot: [N, 3, 3]
+    :return:
+    """
+    return quaternion_to_axis_angle(matrix_to_quaternion(rot))
+
+# def pose6d_to_matrix(batch_poses):
+#     c2w = torch.eye(4, device=batch_poses.device).unsqueeze(0).repeat(batch_poses.shape[0], 1, 1)
+#     c2w[:,:3,:3] = axis_angle_to_matrix(batch_poses[:,:,0])
+#     c2w[:,:3,3] = batch_poses[:,:,1]
+#     return c2w
+#
+# def matrix_to_pose6d(batch_matrices):
+#     return torch.cat([matrix_to_axis_angle(batch_matrices[:,:3,:3]).unsqueeze(-1),
+#                       batch_matrices[:,:3,3:]], dim=-1)
+
+def matrix_to_pose6d(batch_matrices):
+    return torch.cat([matrix_to_quaternion(batch_matrices[:,:3,:3]), batch_matrices[:,:3,3]], dim=-1)
+
+def pose6d_to_matrix(batch_poses):
+    c2w = torch.eye(4, device=batch_poses.device).unsqueeze(0).repeat(batch_poses.shape[0], 1, 1)
+    c2w[:,:3,:3] = quaternion_to_matrix(batch_poses[:,:4])
+    c2w[:,:3,3] = batch_poses[:,4:]
+    return c2w
+
+def raw2outputs_nerf_color(raw, sharpness, z_vals, rays_d, truncation, occupancy=False, device='cuda:0'):
     """
     Transforms model's predictions to semantically meaningful values.
 
@@ -328,6 +372,10 @@ def raw2outputs_nerf_color(raw, z_vals, rays_d, truncation, occupancy=False, dev
         weights = weights * mask
         return weights / (torch.sum(weights, axis=-1, keepdims=True) + 1e-8)
 
+    def sdf2alpha(sdf, sharpness):
+        # return torch.sigmoid(-sdf * sharpness)
+        return 1. - torch.exp(-sharpness * torch.sigmoid(-sdf * sharpness))
+
     dists = z_vals[..., 1:] - z_vals[..., :-1]
     dists = dists.float()
     dists = torch.cat([dists, torch.Tensor([1e10]).float().to(
@@ -348,8 +396,11 @@ def raw2outputs_nerf_color(raw, z_vals, rays_d, truncation, occupancy=False, dev
         weights = alpha.float() * torch.cumprod(torch.cat([torch.ones((alpha.shape[0], 1)).to(
             device).float(), (1.-alpha + 1e-10).float()], -1).float(), -1)[:, :-1]
     else:
-        weights = sdf2weights(raw[..., -1], truncation, z_vals)  # (N_rays, N_samples)
-    
+        # weights = sdf2weights(raw[..., -1], truncation, z_vals)  # (N_rays, N_samples)
+        alpha = sdf2alpha(raw[..., -1], sharpness)
+        weights = alpha.float() * torch.cumprod(torch.cat([torch.ones((alpha.shape[0], 1)).to(
+            device).float(), (1. - alpha + 1e-10).float()], -1).float(), -1)[:, :-1]
+
     prob = weights / weights.sum(-1, keepdim=True)
     entr = (- torch.log(prob + 1e-12) * prob).sum(-1)
     

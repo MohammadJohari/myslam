@@ -810,12 +810,19 @@ class MyNICE(nn.Module):
             [nn.Linear(hidden_size, hidden_size) if i not in self.skips
              else nn.Linear(hidden_size + embedding_size, hidden_size) for i in range(n_blocks - 1)])
 
-        self.output_linear = nn.Linear(hidden_size, 1, bias=False)
+        self.c_linears = nn.ModuleList(
+            [nn.Linear(2 * c_dim, hidden_size)] +
+            [nn.Linear(hidden_size, hidden_size) if i not in self.skips
+             else nn.Linear(hidden_size + embedding_size, hidden_size) for i in range(n_blocks - 1)])
+
+        self.output_linear = nn.Linear(hidden_size, 1)
+        self.c_output_linear = nn.Linear(hidden_size, 3)
+
+        self.sharpness = nn.Parameter(10 * torch.ones(1))
 
         # self.regularizer = Regularizer(c_dim)
 
-    def sample_plane_feature(self, p, planes_xy, planes_xz, planes_yz):
-        p_nor = normalize_3d_coordinate(p.clone(), self.bound)
+    def sample_plane_feature(self, p_nor, planes_xy, planes_xz, planes_yz):
         vgrid = p_nor[None, :, None]
 
         feat = []
@@ -836,8 +843,10 @@ class MyNICE(nn.Module):
 
         return feat
 
-    def forward(self, p, p_mask, c_grid, c_mask=None, planes_xy=None, planes_xz=None, planes_yz=None, stage='middle', **kwargs):
+    def forward(self, p, all_planes=None, stage='middle', **kwargs):
+        planes_xy, planes_xz, planes_yz, c_planes_xy, c_planes_xz, c_planes_yz = all_planes
         device = f'cuda:{p.get_device()}'
+        p_nor = normalize_3d_coordinate(p.clone(), self.bound)
 
         raw = torch.zeros([p.shape[1], 4], device=device)
 
@@ -848,14 +857,23 @@ class MyNICE(nn.Module):
         #     regulated_yz.append(self.regularizer(planes_yz[i]))
         # feat = self.sample_plane_feature(p, regulated_xy, regulated_xz, regulated_yz)
 
-        feat = self.sample_plane_feature(p, planes_xy, planes_xz, planes_yz)
+        feat = self.sample_plane_feature(p_nor, planes_xy, planes_xz, planes_yz)
         h = feat
         for i, l in enumerate(self.linears):
             h = self.linears[i](h)
             h = F.relu(h, inplace=True)
         raw[..., -1] = torch.tanh(self.output_linear(h)).squeeze()
 
-        return raw, None
+        c_feat = self.sample_plane_feature(p_nor, c_planes_xy, c_planes_xz, c_planes_yz)
+        h = c_feat
+        for i, l in enumerate(self.c_linears):
+            h = self.c_linears[i](h)
+            h = F.relu(h, inplace=True)
+        raw[..., :-1] = torch.sigmoid(self.c_output_linear(h))
+
+        # print('sharpness:', self.sharpness.item())
+
+        return raw, self.sharpness
 
 class Regularizer(nn.Module):
     def __init__(self, dim):

@@ -81,27 +81,18 @@ class NICE_SLAM():
         self.mapping_idx.share_memory_()
         self.mapping_cnt = torch.zeros((1)).int()  # counter for mapping
         self.mapping_cnt.share_memory_()
-        
-        for key, val in self.shared_c.items():
-            val = val.to(self.cfg['mapping']['device'])
-            val.share_memory_()
-            self.shared_c[key] = val
-
-        # for key, val in self.shared_c_aux.items():
-        #     val = val.to(self.cfg['mapping']['device'])
-        #     val.share_memory_()
-        #     self.shared_c_aux[key] = val
-
-        for key, val in self.shared_c_mask.items():
-            val = val.to(self.cfg['mapping']['device'])
-            val.share_memory_()
-            self.shared_c_mask[key] = val
 
         for shared_planes in [self.shared_planes_xy, self.shared_planes_xz, self.shared_planes_yz]:
             for i, plane in enumerate(shared_planes):
                 plane = plane.to(self.cfg['mapping']['device'])
                 plane.share_memory_()
                 shared_planes[i] = plane
+
+        for shared_c_planes in [self.shared_c_planes_xy, self.shared_c_planes_xz, self.shared_c_planes_yz]:
+            for i, plane in enumerate(shared_c_planes):
+                plane = plane.to(self.cfg['mapping']['device'])
+                plane.share_memory_()
+                shared_c_planes[i] = plane
 
         self.shared_decoders = self.shared_decoders.to(
             self.cfg['mapping']['device'])
@@ -230,18 +221,13 @@ class NICE_SLAM():
         color_grid_len = cfg['grid_len']['color']
         self.color_grid_len = color_grid_len
 
-        c = {}
-        c_aux = {}
-        c_mask = {}
-
         c_dim = cfg['model']['c_dim']
         o_dim = 8
         xyz_len = self.bound[:, 1]-self.bound[:, 0]
 
         ####### Initializing Planes ############
-        planes_xy = []
-        planes_xz = []
-        planes_yz = []
+        planes_xy, planes_xz, planes_yz = [], [], []
+        c_planes_xy, c_planes_xz, c_planes_yz = [], [], []
         planes_res = [0.24, 0.06]
         # planes_res = [0.64, 0.32]
         planes_dim = c_dim
@@ -252,57 +238,19 @@ class NICE_SLAM():
             planes_xz.append(torch.empty([1, planes_dim, grid_shape[0], grid_shape[2]]).normal_(mean=0, std=0.01))
             planes_yz.append(torch.empty([1, planes_dim, *grid_shape[:2]]).normal_(mean=0, std=0.01))
 
+            c_planes_xy.append(torch.empty([1, planes_dim, *grid_shape[1:]]).normal_(mean=0, std=0.01))
+            c_planes_xz.append(torch.empty([1, planes_dim, grid_shape[0], grid_shape[2]]).normal_(mean=0, std=0.01))
+            c_planes_yz.append(torch.empty([1, planes_dim, *grid_shape[:2]]).normal_(mean=0, std=0.01))
+
         ########################################
 
-        if self.coarse:
-            coarse_key = 'grid_coarse'
-            coarse_val_shape = list(
-                map(int, (xyz_len*self.coarse_bound_enlarge/coarse_grid_len).tolist()))
-            coarse_val_shape[0], coarse_val_shape[2] = coarse_val_shape[2], coarse_val_shape[0]
-            self.coarse_val_shape = coarse_val_shape
-            val_shape = [1, c_dim, *coarse_val_shape]
-            coarse_val = torch.zeros(val_shape).normal_(mean=0, std=0.01)
-            c[coarse_key] = coarse_val
-
-        middle_key = 'grid_middle'
-        middle_val_shape = list(map(int, (xyz_len/middle_grid_len).tolist()))
-        middle_val_shape[0], middle_val_shape[2] = middle_val_shape[2], middle_val_shape[0]
-        self.middle_val_shape = middle_val_shape
-        val_shape = [1, o_dim, *middle_val_shape]
-        middle_val = torch.zeros(val_shape).normal_(mean=0, std=0.01)
-        # middle_val = -0.5 * torch.ones(val_shape)
-        # print('Mid Shape: ', val_shape)
-
-        c[middle_key] = middle_val
-        # c_aux[middle_key] = middle_val.clone()
-        c_mask[middle_key] = torch.ones([1, 1, *val_shape[2:]])
-
-        fine_key = 'grid_fine'
-        fine_val_shape = list(map(int, (xyz_len/fine_grid_len).tolist()))
-        fine_val_shape[0], fine_val_shape[2] = fine_val_shape[2], fine_val_shape[0]
-        self.fine_val_shape = fine_val_shape
-        val_shape = [1, o_dim, *fine_val_shape]
-        fine_val = torch.zeros(val_shape).normal_(mean=0, std=0.01)
-        c[fine_key] = fine_val
-        # print('Fine Shape: ', val_shape)
-
-        # c_aux[fine_key] = fine_val.clone()
-        c_mask[fine_key] = torch.ones([1, 1, *val_shape[2:]])
-
-        color_key = 'grid_color'
-        color_val_shape = list(map(int, (xyz_len/color_grid_len).tolist()))
-        color_val_shape[0], color_val_shape[2] = color_val_shape[2], color_val_shape[0]
-        self.color_val_shape = color_val_shape
-        val_shape = [1, c_dim, *color_val_shape]
-        color_val = torch.zeros(val_shape).normal_(mean=0, std=0.01)
-        c[color_key] = color_val
-
-        self.shared_c = c
-        # self.shared_c_aux = c_aux
-        self.shared_c_mask = c_mask
         self.shared_planes_xy = planes_xy
         self.shared_planes_xz = planes_xz
         self.shared_planes_yz = planes_yz
+
+        self.shared_c_planes_xy = c_planes_xy
+        self.shared_c_planes_xz = c_planes_xz
+        self.shared_c_planes_yz = c_planes_yz
 
     def tracking(self, rank, wandb_q):
         """

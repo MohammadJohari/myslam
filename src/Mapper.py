@@ -7,8 +7,7 @@ import torch
 from colorama import Fore, Style
 from torch.autograd import Variable
 
-from src.common import (get_camera_from_tensor, get_samples,
-                        get_tensor_from_camera, random_select)
+from src.common import (get_samples, random_select, matrix_to_pose6d, pose6d_to_matrix)
 from src.utils.datasets import get_dataset, SeqSampler
 from src.utils.Visualizer import Visualizer
 from src.tools.full_cull_mesh import cull_mesh
@@ -30,6 +29,7 @@ class Mapper(object):
     def __init__(self, cfg, args, slam, coarse_mapper=False, aux_mapper=False
                  ):
 
+        self.stage = None
         self.cfg = cfg
         self.args = args
         self.coarse_mapper = coarse_mapper
@@ -37,14 +37,7 @@ class Mapper(object):
 
         self.idx = slam.idx
         self.nice = slam.nice
-        if aux_mapper:
-            self.truncation = 2.5 * slam.truncation
-            self.c = slam.shared_c_aux
-        else:
-            self.truncation = slam.truncation
-            self.c = slam.shared_c
-            self.c_mask = slam.shared_c_mask
-            # self.c_aux = slam.shared_c_aux
+        self.truncation = slam.truncation
         self.bound = slam.bound
         self.logger = slam.logger
         self.mesher = slam.mesher
@@ -55,9 +48,15 @@ class Mapper(object):
         self.mapping_idx = slam.mapping_idx
         self.mapping_cnt = slam.mapping_cnt
         self.decoders = slam.shared_decoders
+
         self.planes_xy = slam.shared_planes_xy
         self.planes_xz = slam.shared_planes_xz
         self.planes_yz = slam.shared_planes_yz
+
+        self.c_planes_xy = slam.shared_c_planes_xy
+        self.c_planes_xz = slam.shared_c_planes_xz
+        self.c_planes_yz = slam.shared_c_planes_yz
+
         self.estimate_c2w_list = slam.estimate_c2w_list
         self.mapping_first_frame = slam.mapping_first_frame
 
@@ -103,7 +102,7 @@ class Mapper(object):
         self.frame_reader = get_dataset(
             cfg, args, self.scale, device=self.device)
         self.n_img = len(self.frame_reader)
-        self.frame_loader = DataLoader(self.frame_reader, batch_size=1, num_workers=2, pin_memory=False, prefetch_factor=2, sampler=SeqSampler(self.n_img, self.every_frame))
+        self.frame_loader = DataLoader(self.frame_reader, batch_size=1, num_workers=1, pin_memory=False, prefetch_factor=2, sampler=SeqSampler(self.n_img, self.every_frame))
 
         ################################################
         # ray_dataset = get_ray_dataset(cfg, args, self.scale, device=self.device)
@@ -324,8 +323,8 @@ class Mapper(object):
         Returns:
             cur_c2w/None (tensor/None): return the updated cur_c2w, return None if no BA
         """
+        all_planes = (self.planes_xy, self.planes_xz, self.planes_yz, self.c_planes_xy, self.c_planes_xz, self.c_planes_yz)
         H, W, fx, fy, cx, cy = self.H, self.W, self.fx, self.fy, self.cx, self.cy
-        c = self.c
         cfg = self.cfg
         device = self.device
         bottom = torch.tensor([0, 0, 0, 1.], device=device).reshape(1, 4)
@@ -345,6 +344,7 @@ class Mapper(object):
         oldest_frame = None
         if len(keyframe_list) > 0:
             optimize_frame = optimize_frame + [len(keyframe_list)-1]
+            optimize_frame = sorted(optimize_frame)
             oldest_frame = min(optimize_frame)
         optimize_frame += [-1]
 
@@ -375,108 +375,124 @@ class Mapper(object):
                 planes_para.append(plane)
                 planes[i] = plane
 
-        if self.BA:
-            camera_tensor_list = []
-            gt_camera_tensor_list = []
-            for frame in optimize_frame:
-                # the oldest frame should be fixed to avoid drifting
-                if frame != oldest_frame:
-                    if frame != -1:
-                        c2w = keyframe_dict[frame]['est_c2w']
-                        gt_c2w = keyframe_dict[frame]['gt_c2w']
-                    else:
-                        c2w = cur_c2w
-                        gt_c2w = gt_cur_c2w
-                    camera_tensor = get_tensor_from_camera(c2w)
-                    camera_tensor = Variable(
-                        camera_tensor.to(device), requires_grad=True)
-                    camera_tensor_list.append(camera_tensor)
-                    gt_camera_tensor = get_tensor_from_camera(gt_c2w)
-                    gt_camera_tensor_list.append(gt_camera_tensor)
+        c_planes_para = []
+        for c_planes in [self.c_planes_xy, self.c_planes_xz, self.c_planes_yz]:
+            for i, c_plane in enumerate(c_planes):
+                c_plane = Variable(c_plane, requires_grad=True)
+                c_planes_para.append(c_plane)
+                c_planes[i] = c_plane
+
+        gt_depths = []
+        gt_colors = []
+        c2ws = []
+        gt_c2ws = []
+        for frame in optimize_frame:
+            # the oldest frame should be fixed to avoid drifting
+            if frame != oldest_frame:
+                if frame != -1:
+                    gt_depths.append(keyframe_dict[frame]['depth'])
+                    gt_colors.append(keyframe_dict[frame]['color'])
+                    c2ws.append(keyframe_dict[frame]['est_c2w'])
+                    gt_c2ws.append(keyframe_dict[frame]['gt_c2w'])
+                else:
+                    gt_depths.append(cur_gt_depth)
+                    gt_colors.append(cur_gt_color)
+                    c2ws.append(cur_c2w)
+                    gt_c2ws.append(gt_cur_c2w)
+        gt_depths = torch.stack(gt_depths, dim=0)
+        gt_colors = torch.stack(gt_colors, dim=0)
+        c2ws = torch.stack(c2ws, dim=0)
+        gt_c2ws = torch.stack(gt_c2ws, dim=0)
 
         if self.BA:
+            pose6ds = Variable(matrix_to_pose6d(c2ws[-1:]), requires_grad=True)
+            # gt_pose6ds = matrix_to_pose6d(gt_c2ws)
+
             # The corresponding lr will be set according to which stage the optimization is in
             optimizer = Adam([{'params': decoders_para_list, 'lr': 0},
                               {'params': planes_para, 'lr': 0},
-                              {'params': camera_tensor_list, 'lr': 0}])
+                              {'params': c_planes_para, 'lr': 0},
+                              {'params': [pose6ds], 'lr': 0, 'betas':(0.5, 0.999)}])
         else:
             optimizer = Adam([{'params': decoders_para_list, 'lr': 0},
-                              {'params': planes_para, 'lr': 0}])
+                              {'params': planes_para, 'lr': 0},
+                              {'params': c_planes_para, 'lr': 0}])
 
         for joint_iter in range(num_joint_iters):
             self.stage = 'color'
 
             optimizer.param_groups[0]['lr'] = cfg['mapping']['stage'][self.stage]['decoders_lr']*lr_factor
             optimizer.param_groups[1]['lr'] = cfg['mapping']['stage'][self.stage]['fine_lr']*lr_factor
+            optimizer.param_groups[2]['lr'] = cfg['mapping']['stage'][self.stage]['color_lr']*lr_factor
             if self.BA:
                 if self.stage == 'color':
-                    optimizer.param_groups[2]['lr'] = self.BA_cam_lr
+                    # optimizer.param_groups[2]['lr'] = self.BA_cam_lr
+                    optimizer.param_groups[3]['lr'] = 0.001
+                    # if joint_iter >= 9:
+                    #     optimizer.param_groups[2]['lr'] = 0.001
 
             if (not (idx == 0 and self.no_vis_on_first_frame)) and ('Demo' not in self.output) and (not self.aux_mapper):
                 self.visualizer.vis(
-                    idx, joint_iter, cur_gt_depth, cur_gt_color, cur_c2w, self.c, self.planes_xy, self.planes_xz, self.planes_yz, self.decoders, wandb_q)
+                    idx, joint_iter, cur_gt_depth, cur_gt_color, cur_c2w, all_planes, self.decoders, wandb_q)
 
-            with torch.autocast(device_type='cuda', dtype=torch.bfloat16):
-                gt_depths = []
-                gt_colors = []
-                c2ws = []
-                camera_tensor_id = 0
-                for frame in optimize_frame:
-                    if frame != -1:
-                        gt_depth = keyframe_dict[frame]['depth']
-                        gt_color = keyframe_dict[frame]['color']
-                        if self.BA and frame != oldest_frame:
-                            camera_tensor = camera_tensor_list[camera_tensor_id]
-                            camera_tensor_id += 1
-                            c2w = get_camera_from_tensor(camera_tensor)
-                        else:
-                            c2w = keyframe_dict[frame]['est_c2w']
+            # with torch.autocast(device_type='cuda', dtype=torch.bfloat16):
+            if self.BA:
+                # c2ws[1:] = pose6d_to_matrix(pose6ds)
+                c2ws_ = torch.cat([c2ws[0:-1], pose6d_to_matrix(pose6ds)], dim=0)
+                # c2ws = pose6d_to_matrix(pose6ds)
+                # c2ws[:-1] = c2ws[:-1].detach()
+            else:
+                c2ws_ = c2ws
 
-                    else:
-                        gt_depth = cur_gt_depth
-                        gt_color = cur_gt_color
-                        if self.BA:
-                            camera_tensor = camera_tensor_list[camera_tensor_id]
-                            c2w = get_camera_from_tensor(camera_tensor)
-                        else:
-                            c2w = cur_c2w
+            # c2ws = []
+            # camera_tensor_id = 0
+            # for frame in optimize_frame:
+            #     if frame != -1:
+            #         if self.BA and frame != oldest_frame:
+            #             pose6d = pose6ds[camera_tensor_id]
+            #             camera_tensor_id += 1
+            #             c2w = get_camera_from_tensor(camera_tensor)
+            #         else:
+            #             c2w = keyframe_dict[frame]['est_c2w']
+            #
+            #     else:
+            #         if self.BA:
+            #             camera_tensor = camera_tensor_list[camera_tensor_id]
+            #             c2w = get_camera_from_tensor(camera_tensor)
+            #         else:
+            #             c2w = cur_c2w
+            #
+            #     c2ws.append(c2w)
+            # c2ws = torch.stack(c2ws, dim=0)
 
-                    gt_depths.append(gt_depth)
-                    gt_colors.append(gt_color)
-                    c2ws.append(c2w)
-
-                gt_depths = torch.stack(gt_depths, dim=0)
-                gt_colors = torch.stack(gt_colors, dim=0)
-                c2ws = torch.stack(c2ws, dim=0)
-
-                batch_rays_o, batch_rays_d, batch_gt_depth, batch_gt_color = get_samples(
-                    0, H, 0, W, pixs_per_image, H, W, fx, fy, cx, cy, c2ws, gt_depths, gt_colors, self.device)
+            batch_rays_o, batch_rays_d, batch_gt_depth, batch_gt_color = get_samples(
+                0, H, 0, W, pixs_per_image, H, W, fx, fy, cx, cy, c2ws_, gt_depths, gt_colors, self.device)
 
 
 
-                # ret = self.renderer.render_batch_ray(c, self.decoders, batch_rays_d,
-                #                                      batch_rays_o, device, self.stage, self.truncation,
-                #                                      gt_depth=None if self.coarse_mapper else batch_gt_depth)
-                # depth, uncertainty, color, entr, sdf, z_vals = ret
+            # ret = self.renderer.render_batch_ray(c, self.decoders, batch_rays_d,
+            #                                      batch_rays_o, device, self.stage, self.truncation,
+            #                                      gt_depth=None if self.coarse_mapper else batch_gt_depth)
+            # depth, uncertainty, color, entr, sdf, z_vals = ret
 
 
-                ret = self.renderer.no_render_batch_ray(c, self.c_mask, self.planes_xy, self.planes_xz, self.planes_yz, self.decoders, batch_rays_d,
-                                                        batch_rays_o, device, self.stage, self.truncation,
-                                                        gt_depth=None if self.coarse_mapper else batch_gt_depth)
-                sdf, z_vals = ret
+            ret = self.renderer.no_render_batch_ray(all_planes, self.decoders, batch_rays_d,
+                                                    batch_rays_o, device, self.stage, self.truncation,
+                                                    gt_depth=None if self.coarse_mapper else batch_gt_depth)
+            # sdf, z_vals = ret
+            depth, uncertainty, color, _, sdf, z_vals = ret
 
-                depth_mask = (batch_gt_depth > 0)
-                loss = self.sdf_loss(sdf[depth_mask], z_vals[depth_mask], batch_gt_depth[depth_mask])
+            depth_mask = (batch_gt_depth > 0)
+            loss = self.sdf_loss(sdf[depth_mask], z_vals[depth_mask], batch_gt_depth[depth_mask])
 
             # loss = loss + 0.1 * torch.mean(torch.square(sdf[:, -1] + torch.ones_like(sdf[:, -1])))
             # loss = loss + 0.1 * torch.mean(torch.square(sdf + 0.25 * torch.ones_like(sdf)))
 
             ## Sepehr Color loss
-            # if ((not self.nice) or (self.stage == 'color')):
-            #     # loss = loss + 0.0000001 * torch.mean(torch.square(sdf[~depth_mask] - torch.ones_like(sdf[~depth_mask])))
-            #     color_loss = torch.square(batch_gt_color - color).mean()
-            #     weighted_color_loss = 100 * self.w_color_loss*color_loss
-            #     loss += weighted_color_loss
+            if ((not self.nice) or (self.stage == 'color')):
+                color_loss = torch.square(batch_gt_color - color).mean()
+                weighted_color_loss = self.w_color_loss * color_loss
+                loss += weighted_color_loss
 
             # regulation_loss = entr[~depth_mask].mean()
             # regulation_loss = entr.mean()
@@ -548,30 +564,25 @@ class Mapper(object):
             loss.backward(retain_graph=False)
             optimizer.step()
 
-
         if self.BA:
             # put the updated camera poses back
+            optimized_c2ws = pose6d_to_matrix(pose6ds.detach())
+
             camera_tensor_id = 0
-            for id, frame in enumerate(optimize_frame):
+            for frame in optimize_frame[-1:]:
                 if frame != -1:
-                    if frame != oldest_frame:
-                        c2w = get_camera_from_tensor(
-                            camera_tensor_list[camera_tensor_id].detach())
-                        c2w = torch.cat([c2w, bottom], dim=0)
-                        camera_tensor_id += 1
-                        keyframe_dict[frame]['est_c2w'] = c2w.clone()
+                    keyframe_dict[frame]['est_c2w'] = optimized_c2ws[camera_tensor_id]
+                    camera_tensor_id += 1
                 else:
-                    c2w = get_camera_from_tensor(
-                        camera_tensor_list[-1].detach())
-                    c2w = torch.cat([c2w, bottom], dim=0)
-                    cur_c2w = c2w.clone()
-        if self.BA:
+                    cur_c2w = optimized_c2ws[-1]
+
             return cur_c2w
         else:
             return None
 
     def run(self, wandb_q):
         cfg = self.cfg
+        all_planes = (self.planes_xy, self.planes_xz, self.planes_yz, self.c_planes_xy, self.c_planes_xz, self.c_planes_yz)
         idx, gt_color, gt_depth, gt_c2w = self.frame_reader[0]
         data_iter = iter(self.frame_loader)
 
@@ -610,7 +621,6 @@ class Mapper(object):
             # _, gt_color, gt_depth, gt_c2w = self.frame_reader[idx]
             _, gt_color, gt_depth, gt_c2w = next(data_iter)
             gt_color, gt_depth, gt_c2w = gt_color.squeeze(0), gt_depth.squeeze(0), gt_c2w.squeeze(0)
-
             if not init:
                 lr_factor = cfg['mapping']['lr_factor']
                 num_joint_iters = cfg['mapping']['iters']
@@ -682,7 +692,7 @@ class Mapper(object):
 
                 if (idx % self.mesh_freq == 0) and (not (idx == 0 and self.no_mesh_on_first_frame)):
                     mesh_out_file = f'{self.output}/mesh/{idx:05d}_mesh.ply'
-                    self.mesher.get_mesh(mesh_out_file, self.c, self.planes_xy, self.planes_xz, self.planes_yz, self.decoders, self.keyframe_dict, self.estimate_c2w_list,
+                    self.mesher.get_mesh(mesh_out_file, all_planes, self.decoders, self.keyframe_dict, self.estimate_c2w_list,
                                          idx,  self.device, show_forecast=self.mesh_coarse_level,
                                          clean_mesh=self.clean_mesh, get_mask_use_all_frames=False)
 
@@ -696,7 +706,7 @@ class Mapper(object):
                     
                     if self.eval_rec:
                         mesh_out_file = f'{self.output}/mesh/final_mesh_eval_rec.ply'
-                        self.mesher.get_mesh(mesh_out_file, self.c, self.planes_xy, self.planes_xz, self.planes_yz, self.decoders, self.keyframe_dict,
+                        self.mesher.get_mesh(mesh_out_file, all_planes, self.decoders, self.keyframe_dict,
                                              self.estimate_c2w_list, idx, self.device, show_forecast=False,
                                              clean_mesh=self.clean_mesh, get_mask_use_all_frames=True)
 
