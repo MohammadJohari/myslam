@@ -175,10 +175,10 @@ class Tracker(object):
         depth_mask = (batch_gt_depth > 0) & good_mask
         loss = self.sdf_loss(sdf[depth_mask], z_vals[depth_mask], batch_gt_depth[depth_mask])
 
-        # if self.use_color_in_tracking:
-        #     color_loss = torch.square(
-        #         batch_gt_color - color)[good_mask].mean()
-        #     loss += self.w_color_loss*color_loss
+        if self.use_color_in_tracking:
+            color_loss = torch.square(
+                batch_gt_color - color)[good_mask].mean()
+            loss += self.w_color_loss*color_loss
 
         optimizer.zero_grad()
         loss.backward()

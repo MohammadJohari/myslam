@@ -13,8 +13,8 @@ tracking:
   iters: 10
 mapping:
   every_frame: 4
-  vis_freq: 40000000
-  vis_inside_freq: 10
+  vis_freq: 4000000
+  vis_inside_freq: 100
   mesh_freq: 20000
   ckpt_freq: 5000
   keyframe_every: 4

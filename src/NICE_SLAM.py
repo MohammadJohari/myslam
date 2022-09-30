@@ -229,7 +229,8 @@ class NICE_SLAM():
         planes_xy, planes_xz, planes_yz = [], [], []
         c_planes_xy, c_planes_xz, c_planes_yz = [], [], []
         planes_res = [0.24, 0.06]
-        # planes_res = [0.64, 0.32]
+        c_planes_res = [0.24, 0.02]
+
         planes_dim = c_dim
         for grid_len in planes_res:
             grid_shape = list(map(int, (xyz_len / grid_len).tolist()))
@@ -238,6 +239,9 @@ class NICE_SLAM():
             planes_xz.append(torch.empty([1, planes_dim, grid_shape[0], grid_shape[2]]).normal_(mean=0, std=0.01))
             planes_yz.append(torch.empty([1, planes_dim, *grid_shape[:2]]).normal_(mean=0, std=0.01))
 
+        for grid_len in c_planes_res:
+            grid_shape = list(map(int, (xyz_len / grid_len).tolist()))
+            grid_shape[0], grid_shape[2] = grid_shape[2], grid_shape[0]
             c_planes_xy.append(torch.empty([1, planes_dim, *grid_shape[1:]]).normal_(mean=0, std=0.01))
             c_planes_xz.append(torch.empty([1, planes_dim, grid_shape[0], grid_shape[2]]).normal_(mean=0, std=0.01))
             c_planes_yz.append(torch.empty([1, planes_dim, *grid_shape[:2]]).normal_(mean=0, std=0.01))

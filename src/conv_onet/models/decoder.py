@@ -822,7 +822,7 @@ class MyNICE(nn.Module):
 
         # self.regularizer = Regularizer(c_dim)
 
-    def sample_plane_feature(self, p_nor, planes_xy, planes_xz, planes_yz):
+    def sample_plane_feature(self, p_nor, planes_xy, planes_xz, planes_yz, act=True):
         vgrid = p_nor[None, :, None]
 
         feat = []
@@ -830,16 +830,11 @@ class MyNICE(nn.Module):
             xy = F.grid_sample(planes_xy[i], vgrid[..., [0, 1]], padding_mode='border', align_corners=True, mode='bilinear').squeeze().transpose(0, 1)
             xz = F.grid_sample(planes_xz[i], vgrid[..., [0, 2]], padding_mode='border', align_corners=True, mode='bilinear').squeeze().transpose(0, 1)
             yz = F.grid_sample(planes_yz[i], vgrid[..., [1, 2]], padding_mode='border', align_corners=True, mode='bilinear').squeeze().transpose(0, 1)
-            # feat.append(xy + xz + yz)
-            # feat.append(xy * xz * yz)
-            feat.append(F.relu(xy + xz + yz, inplace=True))
-            # feat.append(F.relu(xy * xz * yz, inplace=True))
-            # feat.append(F.relu(xy, inplace=True) + F.relu(xz, inplace=True) + F.relu(yz, inplace=True))
-            # feat.append(F.relu(xy, inplace=True) * F.relu(xz, inplace=True) * F.relu(yz, inplace=True))
+            if act:
+                feat.append(F.relu(xy + xz + yz, inplace=True))
+            else:
+                feat.append(xy + xz + yz)
         feat = torch.cat(feat, dim=-1)
-
-        # embedded_pts = self.embedder(p_nor)
-        # feat = torch.cat([feat, embedded_pts], dim=-1)
 
         return feat
 
@@ -857,21 +852,21 @@ class MyNICE(nn.Module):
         #     regulated_yz.append(self.regularizer(planes_yz[i]))
         # feat = self.sample_plane_feature(p, regulated_xy, regulated_xz, regulated_yz)
 
-        feat = self.sample_plane_feature(p_nor, planes_xy, planes_xz, planes_yz)
+        feat = self.sample_plane_feature(p_nor, planes_xy, planes_xz, planes_yz, act=True)
         h = feat
         for i, l in enumerate(self.linears):
             h = self.linears[i](h)
             h = F.relu(h, inplace=True)
         raw[..., -1] = torch.tanh(self.output_linear(h)).squeeze()
 
-        c_feat = self.sample_plane_feature(p_nor, c_planes_xy, c_planes_xz, c_planes_yz)
+        c_feat = self.sample_plane_feature(p_nor, c_planes_xy, c_planes_xz, c_planes_yz, act=True)
         h = c_feat
         for i, l in enumerate(self.c_linears):
             h = self.c_linears[i](h)
             h = F.relu(h, inplace=True)
         raw[..., :-1] = torch.sigmoid(self.c_output_linear(h))
 
-        # print('sharpness:', self.sharpness.item())
+        print('sharpness:', self.sharpness.item())
 
         return raw, self.sharpness
 

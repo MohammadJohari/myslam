@@ -27,12 +27,13 @@ meshing:
 tracking:
   ignore_edge_W: 20
   ignore_edge_H: 20
-  use_color_in_tracking: False
+  use_color_in_tracking: True
   device: "cuda:0"
   handle_dynamic: True
   vis_freq: 5000
   vis_inside_freq: 25
-  w_color_loss: 0.03
+#  w_color_loss: 0.0001
+  w_color_loss: 1
   seperate_LR: False
   const_speed_assumption: True
   no_vis_on_first_frame: True
@@ -59,6 +60,7 @@ mapping:
   ckpt_freq: 500
   keyframe_every: 50
   mapping_window_size: 5
+#  w_color_loss: 0.0001
   w_color_loss: 1
   frustum_feature_selection: False
   keyframe_selection_method: 'global'

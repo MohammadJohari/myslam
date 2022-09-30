@@ -358,9 +358,9 @@ def raw2outputs_nerf_color(raw, sharpness, z_vals, rays_d, truncation, occupancy
         return 1. - torch.exp(-F.softplus(20 * raw))
         # return 1. - torch.exp(-F.softplus(raw) * dists * 10)
 
-    def sdf2weights(sdf, truncation, z_vals):
+    def sdf2weights(sdf, truncation, z_vals, sharpness):
         # weights = torch.sigmoid(sdf / truncation) * torch.sigmoid(-sdf / truncation)
-        weights = torch.sigmoid(10 * sdf) * torch.sigmoid(-10 * sdf)
+        weights = torch.sigmoid(sharpness * sdf) * torch.sigmoid(-sharpness * sdf)
 
         signs = sdf[:, 1:] * sdf[:, :-1]
         mask = torch.where(signs < 0.0, torch.ones_like(signs), torch.zeros_like(signs))
@@ -396,10 +396,10 @@ def raw2outputs_nerf_color(raw, sharpness, z_vals, rays_d, truncation, occupancy
         weights = alpha.float() * torch.cumprod(torch.cat([torch.ones((alpha.shape[0], 1)).to(
             device).float(), (1.-alpha + 1e-10).float()], -1).float(), -1)[:, :-1]
     else:
-        # weights = sdf2weights(raw[..., -1], truncation, z_vals)  # (N_rays, N_samples)
-        alpha = sdf2alpha(raw[..., -1], sharpness)
-        weights = alpha.float() * torch.cumprod(torch.cat([torch.ones((alpha.shape[0], 1)).to(
-            device).float(), (1. - alpha + 1e-10).float()], -1).float(), -1)[:, :-1]
+        weights = sdf2weights(raw[..., -1], truncation, z_vals, sharpness)  # (N_rays, N_samples)
+        # alpha = sdf2alpha(raw[..., -1], sharpness)
+        # weights = alpha.float() * torch.cumprod(torch.cat([torch.ones((alpha.shape[0], 1)).to(
+        #     device).float(), (1. - alpha + 1e-10).float()], -1).float(), -1)[:, :-1]
 
     prob = weights / weights.sum(-1, keepdim=True)
     entr = (- torch.log(prob + 1e-12) * prob).sum(-1)
