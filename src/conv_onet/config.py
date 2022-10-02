@@ -20,11 +20,12 @@ def get_model(cfg,  nice=True):
     color_grid_len = cfg['grid_len']['color']
     c_dim = cfg['model']['c_dim']  # feature dimensions
     pos_embedding_method = cfg['model']['pos_embedding_method']
+    truncation = cfg['model']['truncation']
     if nice:
         decoder = models.decoder_dict['nice'](
             dim=dim, c_dim=c_dim, coarse=cfg['coarse'], coarse_grid_len=coarse_grid_len,
             middle_grid_len=middle_grid_len, fine_grid_len=fine_grid_len,
-            color_grid_len=color_grid_len, pos_embedding_method=pos_embedding_method)
+            color_grid_len=color_grid_len, pos_embedding_method=pos_embedding_method, truncation=truncation)
     else:
         decoder = models.decoder_dict['imap'](
             dim=dim, c_dim=0, color=True,

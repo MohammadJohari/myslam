@@ -151,24 +151,7 @@ class Tracker(object):
                                                 self.decoders, batch_rays_d,
                                                 batch_rays_o, self.device, 'color', self.truncation,
                                                 gt_depth=batch_gt_depth)
-        # sdf, z_vals = ret
-        depth, uncertainty, color, _, sdf, z_vals = ret
-
-        # ret = self.renderer.render_batch_ray(
-        #     self.c, self.decoders, batch_rays_d, batch_rays_o,  self.device, stage='color', truncation=self.truncation, gt_depth=batch_gt_depth)
-        # depth, uncertainty, color, _, sdf, z_vals = ret
-
-        # uncertainty = uncertainty.detach()
-        # if self.handle_dynamic:
-        #     tmp = torch.abs(batch_gt_depth-depth)/torch.sqrt(uncertainty+1e-10)
-        #     mask = (tmp < 10*tmp.median()) & (batch_gt_depth > 0)
-        # else:
-        #     mask = batch_gt_depth > 0
-
-        # loss = (torch.abs(batch_gt_depth-depth) /
-        #         torch.sqrt(uncertainty+1e-10))[mask].sum()
-
-        # loss = self.sdf_loss(sdf[mask], z_vals[mask], batch_gt_depth[mask])
+        depth, color, sdf, z_vals = ret
 
         # depth_mask = batch_gt_depth > 0
         good_mask = torch.abs(batch_gt_depth - depth) < 0.10
@@ -218,7 +201,7 @@ class Tracker(object):
         if self.verbose:
             pbar = self.frame_loader
         else:
-            pbar = tqdm(self.frame_loader)
+            pbar = tqdm(self.frame_loader, smoothing=0.05)
 
         wandb_dir = self.cfg['data']['output']
         wandb_name = wandb_dir.split('/')[-1]
@@ -234,13 +217,13 @@ class Tracker(object):
                 # initiate mapping every self.every_frame frames
                 if idx > 0 and (idx % self.every_frame == 1 or self.every_frame == 1):
                     while self.mapping_idx[0] != idx-1:
-                        time.sleep(0.1)
+                        time.sleep(0.001)
                     pre_c2w = self.estimate_c2w_list[idx-1].unsqueeze(0).to(device)
             elif self.sync_method == 'loose':
                 # mapping idx can be later than tracking idx is within the bound of
                 # [-self.every_frame-self.every_frame//2, -self.every_frame+self.every_frame//2]
                 while self.mapping_idx[0] < idx-self.every_frame-self.every_frame//2:
-                    time.sleep(0.1)
+                    time.sleep(0.001)
             elif self.sync_method == 'free':
                 # pure parallel, if mesh/vis happens may cause inbalance
                 pass
@@ -335,7 +318,8 @@ class Tracker(object):
             pre_c2w = c2w.clone()
             self.idx[0] = idx
 
-            print("---Tracking Time: %s seconds ---" % (time.time() - start_time))
+            if self.verbose:
+                print("---Tracking Time: %s seconds ---" % (time.time() - start_time))
 
             while not wandb_q.empty():
                 wandb_val, wandb_idx = wandb_q.get()

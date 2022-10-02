@@ -1,7 +1,7 @@
 coarse: False
 sync_method: strict
 scale: 1
-verbose: True
+verbose: False
 occupancy: False
 low_gpu_mem: False
 grid_len:
@@ -32,8 +32,7 @@ tracking:
   handle_dynamic: True
   vis_freq: 5000
   vis_inside_freq: 25
-#  w_color_loss: 0.0001
-  w_color_loss: 1
+  w_color_loss: 10
   seperate_LR: False
   const_speed_assumption: True
   no_vis_on_first_frame: True
@@ -60,8 +59,7 @@ mapping:
   ckpt_freq: 500
   keyframe_every: 50
   mapping_window_size: 5
-#  w_color_loss: 0.0001
-  w_color_loss: 1
+  w_color_loss: 10
   frustum_feature_selection: False
   keyframe_selection_method: 'global'
   save_selected_keyframes_info: False
@@ -112,7 +110,7 @@ cam:
   crop_edge: 0
 rendering:
   N_samples: 32
-  N_surface: 16
+  N_surface: 8
   N_importance: 0
   lindisp: False
   perturb: 1.0
@@ -120,5 +118,6 @@ data:
   dim: 3
 model:
   c_dim: 32
+  truncation: 0.08
   coarse_bound_enlarge: 2
   pos_embedding_method: fourier

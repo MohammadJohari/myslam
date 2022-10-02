@@ -52,7 +52,7 @@ class Visualizer(object):
                 else:
                     c2w = c2w_or_camera_tensor.squeeze().detach()
 
-                depth, uncertainty, color = self.renderer.render_img(
+                depth, color = self.renderer.render_img(
                     all_planes,
                     decoders,
                     c2w,
@@ -69,8 +69,7 @@ class Visualizer(object):
 
                 wandb_q.put(({
                     "Depth Error": depth_residual.mean(),
-                    "Color Error": color_residual.mean(),
-                    "Depth Uncertainty": uncertainty.detach().cpu().numpy().mean()
+                    "Color Error": color_residual.mean()
                     }, None))
 
                 fig, axs = plt.subplots(2, 3)

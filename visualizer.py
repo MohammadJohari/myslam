@@ -57,9 +57,10 @@ if __name__ == '__main__':
     estimate_c2w_list = estimate_c2w_list.cpu().numpy()
     gt_c2w_list = gt_c2w_list.cpu().numpy()
 
-    frontend = SLAMFrontend(output, init_pose=estimate_c2w_list[0], cam_scale=0.3,
+    frontend = SLAMFrontend(output, init_pose=estimate_c2w_list[0], cam_scale=0.1,
                             save_rendering=args.save_rendering, near=0,
-                            estimate_c2w_list=estimate_c2w_list, gt_c2w_list=gt_c2w_list).start()
+                            estimate_c2w_list=estimate_c2w_list, gt_c2w_list=gt_c2w_list)
+    frontend.start()
 
     for i in tqdm(range(0, N+1)):
         # show every second frame for speed up
@@ -76,7 +77,7 @@ if __name__ == '__main__':
             whole = cv2.resize(whole, (W//4, H//4))
             cv2.imshow(f'Input RGB-D Sequence', whole[:, :, ::-1])
             cv2.waitKey(1)
-        time.sleep(0.03)
+        time.sleep(0.05)
         meshfile = f'{output}/mesh/{i:05d}_mesh.ply'
         if os.path.isfile(meshfile):
             frontend.update_mesh(meshfile)

@@ -479,14 +479,10 @@ class Mapper(object):
             ret = self.renderer.no_render_batch_ray(all_planes, self.decoders, batch_rays_d,
                                                     batch_rays_o, device, self.stage, self.truncation,
                                                     gt_depth=None if self.coarse_mapper else batch_gt_depth)
-            # sdf, z_vals = ret
-            depth, uncertainty, color, _, sdf, z_vals = ret
+            depth, color, sdf, z_vals = ret
 
             depth_mask = (batch_gt_depth > 0)
             loss = self.sdf_loss(sdf[depth_mask], z_vals[depth_mask], batch_gt_depth[depth_mask])
-
-            # loss = loss + 0.1 * torch.mean(torch.square(sdf[:, -1] + torch.ones_like(sdf[:, -1])))
-            # loss = loss + 0.1 * torch.mean(torch.square(sdf + 0.25 * torch.ones_like(sdf)))
 
             ## Sepehr Color loss
             if ((not self.nice) or (self.stage == 'color')):
@@ -549,17 +545,6 @@ class Mapper(object):
             #
             #     loss += 0.5 * tv_loss
 
-            #### random negs
-            # if idx == 0:
-            #     pts = torch.rand([5000, 3]).to(device)
-            #     pts[:, 0] = pts[:, 0] * (self.bound[0, 1] - self.bound[0, 0]) + self.bound[0, 0]
-            #     pts[:, 1] = pts[:, 1] * (self.bound[1, 1] - self.bound[1, 0]) + self.bound[1, 0]
-            #     pts[:, 2] = pts[:, 2] * (self.bound[2, 1] - self.bound[2, 0]) + self.bound[2, 0]
-            #
-            #     rnd_sdf = self.renderer.eval_points(pts, torch.zeros_like(pts), self.decoders, c, None, 'color', device)[..., -1]
-            #     rnd_loss = ((rnd_sdf + torch.ones_like(rnd_sdf)) ** 2).mean()
-            #     loss = loss + 0 * rnd_loss
-
             optimizer.zero_grad()
             loss.backward(retain_graph=False)
             optimizer.step()
@@ -606,7 +591,7 @@ class Mapper(object):
                 elif self.sync_method == 'free':
                     break
                 
-                time.sleep(0.1)
+                time.sleep(0.001)
             prev_idx = idx
 
             start_time = time.time()
@@ -669,8 +654,9 @@ class Mapper(object):
                         self.keyframe_dict.append({'gt_c2w': gt_c2w, 'idx': idx, 'color': gt_color,
                         'depth': gt_depth, 'est_c2w': cur_c2w.clone()})
 
-            prefix = 'Auxiliary' if self.aux_mapper else ''
-            print("---%s Mapping Time: %s seconds ---" % (prefix, (time.time() - start_time)))
+            if self.verbose:
+                prefix = 'Auxiliary' if self.aux_mapper else ''
+                print("---%s Mapping Time: %s seconds ---" % (prefix, (time.time() - start_time)))
 
             if self.low_gpu_mem:
                 torch.cuda.empty_cache()

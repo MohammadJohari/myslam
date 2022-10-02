@@ -21,69 +21,6 @@ class Renderer(object):
 
         self.H, self.W, self.fx, self.fy, self.cx, self.cy = slam.H, slam.W, slam.fx, slam.fy, slam.cx, slam.cy
 
-    # def eval_points(self, p, p_mask, planes_xy, planes_xz, planes_yz, decoders, c=None, c_mask=None, stage='color', device='cuda:0'):
-    #     """
-    #     Evaluates the occupancy and/or color value for the points.
-    #
-    #     Args:
-    #         p (tensor, N*3): Point coordinates.
-    #         decoders (nn.module decoders): Decoders.
-    #         c (dicts, optional): Feature grids. Defaults to None.
-    #         stage (str, optional): Query stage, corresponds to different levels. Defaults to 'color'.
-    #         device (str, optional): CUDA device. Defaults to 'cuda:0'.
-    #
-    #     Returns:
-    #         ret (tensor): occupancy (and color) value of input points.
-    #     """
-    #
-    #     p_split = torch.split(p, self.points_batch_size)
-    #     p_mask_split = torch.split(p_mask, self.points_batch_size)
-    #     bound = self.bound
-    #     rets = []
-    #     for pi, pi_mask in zip(p_split, p_mask_split):
-    #         # mask for points out of bound
-    #         mask_x = (pi[:, 0] < bound[0][1]) & (pi[:, 0] > bound[0][0])
-    #         mask_y = (pi[:, 1] < bound[1][1]) & (pi[:, 1] > bound[1][0])
-    #         mask_z = (pi[:, 2] < bound[2][1]) & (pi[:, 2] > bound[2][0])
-    #         mask = mask_x & mask_y & mask_z
-    #
-    #         pi = pi.unsqueeze(0)
-    #         pi_mask = pi_mask.unsqueeze(0)
-    #         if self.nice:
-    #             ret, _ = decoders(pi, pi_mask, c_grid=c, c_mask=c_mask, planes_xy=planes_xy, planes_xz=planes_xz, planes_yz=planes_yz, stage=stage)
-    #         else:
-    #             ret = decoders(pi, c_grid=None)
-    #         ret = ret.squeeze(0)
-    #         if len(ret.shape) == 1 and ret.shape[0] == 4:
-    #             ret = ret.unsqueeze(0)
-    #
-    #         # ret[~mask, 3] = 100
-    #         ret[~mask, 3] = -1
-    #         rets.append(ret)
-    #
-    #     ret = torch.cat(rets, dim=0)
-    #     return ret
-
-    def eval_points(self, p, p_mask, all_planes, decoders, stage='color', device='cuda:0'):
-        """
-        Evaluates the occupancy and/or color value for the points.
-
-        Args:
-            p (tensor, N*3): Point coordinates.
-            decoders (nn.module decoders): Decoders.
-            c (dicts, optional): Feature grids. Defaults to None.
-            stage (str, optional): Query stage, corresponds to different levels. Defaults to 'color'.
-            device (str, optional): CUDA device. Defaults to 'cuda:0'.
-
-        Returns:
-            ret (tensor): occupancy (and color) value of input points.
-        """
-        pi = p.unsqueeze(0)
-        ret, sharpness = decoders(pi, all_planes=all_planes, stage=stage)
-        ret = ret.squeeze(0)
-
-        return ret, sharpness
-
     def perturbation(self, z_vals):
         # get intervals between samples
         mids = 0.5 * (z_vals[..., 1:] + z_vals[..., :-1])
@@ -157,33 +94,10 @@ class Renderer(object):
 
         pts = rays_o[..., None, :] + rays_d[..., None, :] * \
               z_vals[..., :, None]  # [N_rays, N_samples+N_surface, 3]
-        pointsf = pts.reshape(-1, 3)
 
-        raw, sharpness= self.eval_points(pointsf, torch.zeros_like(pointsf), all_planes, decoders, stage, device)
-        raw = raw.reshape(N_rays, N_samples+N_surface, -1)
+        rendered_depth, rendered_rgb, sdf = decoders(pts, z_vals, all_planes)
 
-        depth, uncertainty, color, weights, entr = raw2outputs_nerf_color(raw, sharpness, z_vals, rays_d, truncation, occupancy=self.occupancy, device=device)
-
-        sdf = raw[..., -1]
-
-        # if N_importance > 0:
-        #     z_vals_mid = .5 * (z_vals[..., 1:] + z_vals[..., :-1])
-        #     z_samples = sample_pdf(
-        #         z_vals_mid, weights[..., 1:-1], N_importance, det=(self.perturb == 0.), device=device)
-        #     z_samples = z_samples.detach()
-        #     z_vals, _ = torch.sort(torch.cat([z_vals, z_samples], -1), -1)
-
-        #     pts = rays_o[..., None, :] + \
-        #         rays_d[..., None, :] * z_vals[..., :, None]
-        #     pts = pts.reshape(-1, 3)
-        #     raw = self.eval_points(pts, decoders, c, stage, device)
-        #     raw = raw.reshape(N_rays, N_samples+N_importance+N_surface, -1)
-
-        #     depth, uncertainty, color, weights = raw2outputs_nerf_color(
-        #         raw, z_vals, rays_d, truncation, occupancy=self.occupancy, device=device)
-        #     return depth, uncertainty, color
-
-        return depth, uncertainty, color, _, sdf, z_vals
+        return rendered_depth, rendered_rgb, sdf, z_vals
 
     def render_img(self, all_planes, decoders, c2w, truncation, device, stage, gt_depth=None):
         """
@@ -234,16 +148,14 @@ class Renderer(object):
                                                             rays_o_batch, device, stage, truncation,
                                                             gt_depth=gt_depth_batch)
 
-                depth, uncertainty, color, _, _, _ = ret
+                depth, color, _, _ = ret
                 depth_list.append(depth.double())
-                uncertainty_list.append(uncertainty.double())
                 color_list.append(color)
 
             depth = torch.cat(depth_list, dim=0)
-            uncertainty = torch.cat(uncertainty_list, dim=0)
             color = torch.cat(color_list, dim=0)
 
             depth = depth.reshape(H, W)
-            uncertainty = uncertainty.reshape(H, W)
             color = color.reshape(H, W, 3)
-            return depth, uncertainty, color
+
+            return depth, color

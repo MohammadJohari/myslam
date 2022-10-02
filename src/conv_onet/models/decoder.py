@@ -778,13 +778,14 @@ class MyNICE(nn.Module):
 
     def __init__(self, dim=3, c_dim=16,
                  coarse_grid_len=2.0, middle_grid_len=0.16, fine_grid_len=0.16,
-                 color_grid_len=0.16, hidden_size=16, coarse=False, pos_embedding_method='fourier', n_blocks=2, skips=[]):
+                 color_grid_len=0.16, hidden_size=16, coarse=False, pos_embedding_method='fourier', truncation=0.08, n_blocks=2, skips=[]):
         super().__init__()
 
         self.middle_grid_len = middle_grid_len
         self.fine_grid_len = fine_grid_len
 
         self.c_dim = c_dim
+        self.truncation = truncation
         self.n_blocks = n_blocks
         self.skips = skips
 
@@ -820,7 +821,22 @@ class MyNICE(nn.Module):
 
         self.sharpness = nn.Parameter(10 * torch.ones(1))
 
-        # self.regularizer = Regularizer(c_dim)
+    def sdf2weights(self, sdf, z_vals):
+        weights = torch.sigmoid(self.sharpness * sdf) * torch.sigmoid(-self.sharpness * sdf)
+
+        with torch.no_grad():
+            signs = sdf[:, 1:] * sdf[:, :-1]
+            mask = torch.where(signs < 0.0, torch.ones_like(signs), torch.zeros_like(signs))
+            inds = torch.argmax(mask, dim=1)
+            inds = inds[..., None]
+            z_min = torch.gather(z_vals, 1, inds) # The first surface
+            mask = torch.where(z_vals < z_min + self.truncation, torch.ones_like(z_vals), torch.zeros_like(z_vals))
+            mask = mask * (weights > 0.0001)
+
+        weights = weights * mask
+        weights = weights / (torch.sum(weights, dim=-1, keepdim=True) + 1e-8)
+
+        return weights
 
     def sample_plane_feature(self, p_nor, planes_xy, planes_xz, planes_yz, act=True):
         vgrid = p_nor[None, :, None]
@@ -838,102 +854,52 @@ class MyNICE(nn.Module):
 
         return feat
 
-    def forward(self, p, all_planes=None, stage='middle', **kwargs):
-        planes_xy, planes_xz, planes_yz, c_planes_xy, c_planes_xz, c_planes_yz = all_planes
-        device = f'cuda:{p.get_device()}'
-        p_nor = normalize_3d_coordinate(p.clone(), self.bound)
-
-        raw = torch.zeros([p.shape[1], 4], device=device)
-
-        # regulated_xy ,regulated_xz, regulated_yz = [], [], []
-        # for i in range(len(planes_xy)):
-        #     regulated_xy.append(self.regularizer(planes_xy[i]))
-        #     regulated_xz.append(self.regularizer(planes_xz[i]))
-        #     regulated_yz.append(self.regularizer(planes_yz[i]))
-        # feat = self.sample_plane_feature(p, regulated_xy, regulated_xz, regulated_yz)
-
+    def get_raw_sdf(self, p_nor, planes_xy, planes_xz, planes_yz):
         feat = self.sample_plane_feature(p_nor, planes_xy, planes_xz, planes_yz, act=True)
         h = feat
         for i, l in enumerate(self.linears):
             h = self.linears[i](h)
             h = F.relu(h, inplace=True)
-        raw[..., -1] = torch.tanh(self.output_linear(h)).squeeze()
+        sdf = torch.tanh(self.output_linear(h)).squeeze()
 
+        return sdf
+
+    def get_raw_rgb(self, p_nor, c_planes_xy, c_planes_xz, c_planes_yz):
         c_feat = self.sample_plane_feature(p_nor, c_planes_xy, c_planes_xz, c_planes_yz, act=True)
         h = c_feat
         for i, l in enumerate(self.c_linears):
             h = self.c_linears[i](h)
             h = F.relu(h, inplace=True)
-        raw[..., :-1] = torch.sigmoid(self.c_output_linear(h))
+        rgb = torch.sigmoid(self.c_output_linear(h))
 
-        print('sharpness:', self.sharpness.item())
+        return rgb
 
-        return raw, self.sharpness
+    def get_only_raw(self, p, all_planes):
+        planes_xy, planes_xz, planes_yz, c_planes_xy, c_planes_xz, c_planes_yz = all_planes
+        p_nor = normalize_3d_coordinate(p.clone(), self.bound)
 
-class Regularizer(nn.Module):
-    def __init__(self, dim):
-        super(Regularizer, self).__init__()
+        sdf = self.get_raw_sdf(p_nor, planes_xy, planes_xz, planes_yz)
+        rgb = self.get_raw_rgb(p_nor, c_planes_xy, c_planes_xz, c_planes_yz)
 
-        # Encoder
-        self.conv1 = nn.Sequential(
-            nn.Conv2d(dim, 2 * dim, 3, stride=1, padding=1),
-            # nn.InstanceNorm2d(2 * dim),
-            nn.MaxPool2d(2),
-            nn.ELU(alpha=1.0, inplace=True),
-        )
-        self.conv2 = nn.Sequential(
-            nn.Conv2d(2 * dim, 2 * dim, 3, stride=1, padding=1),
-            # nn.InstanceNorm2d(4 * dim),
-            nn.ELU(alpha=1.0, inplace=True),
-            nn.MaxPool2d(2),
-        )
-        self.conv3 = nn.Sequential(
-            nn.Conv2d(2 * dim, 2 * dim, 3, stride=1, padding=1),
-            # nn.InstanceNorm2d(4 * dim),
-            nn.ELU(alpha=1.0, inplace=True),
-            nn.MaxPool2d(2),
-        )
+        return torch.cat([rgb, sdf.unsqueeze(-1)], dim=-1)
 
-        # Decoder
-        self.t_conv1 = nn.Sequential(
-            nn.ConvTranspose2d(2 * dim, 2 * dim, 4, stride=2, padding=1),
-            # nn.InstanceNorm2d(4 * dim),
-            nn.ELU(alpha=1.0, inplace=True),
-        )
-        self.t_conv2 = nn.Sequential(
-            nn.ConvTranspose2d(4 * dim, 2 * dim, 4, stride=2, padding=1),
-            # nn.InstanceNorm2d(2 * dim),
-            nn.ELU(alpha=1.0, inplace=True),
-        )
-        self.t_conv3 = nn.Sequential(
-            nn.ConvTranspose2d(4 * dim, dim, 4, stride=2, padding=1),
-            # nn.InstanceNorm2d(dim),
-            nn.ELU(alpha=1.0, inplace=True),
-        )
-        # Output
-        self.conv_out = nn.Sequential(
-            nn.Conv2d(2 * dim, dim, 3, stride=1, padding=1),
-            # nn.InstanceNorm2d(dim),
-            nn.ELU(alpha=1.0, inplace=True),
-        )
+    def forward(self, p, z_vals, all_planes):
+        planes_xy, planes_xz, planes_yz, c_planes_xy, c_planes_xz, c_planes_yz = all_planes
+        p_shape = p.shape
+        p_nor = normalize_3d_coordinate(p.clone(), self.bound)
 
-    def forward(self, x):
-        pad_h = (8 - x.shape[2] % 8) % 8
-        pad_w = (8 - x.shape[3] % 8) % 8
-        x = F.pad(x, (0, pad_w, 0, pad_h), mode='replicate')
+        sdf = self.get_raw_sdf(p_nor, planes_xy, planes_xz, planes_yz)
+        sdf = sdf.reshape(*p_shape[0:2])
+        weights = self.sdf2weights(sdf, z_vals)
 
-        input = x
+        # rgb = self.get_raw_rgb(p_nor, c_planes_xy, c_planes_xz, c_planes_yz)
+        rgb = torch.zeros([p_nor.shape[0], 3], device=p_nor.device)
+        nonzero_mask = weights.reshape(-1) > 0.0
+        rgb_nonzero = self.get_raw_rgb(p_nor[nonzero_mask], c_planes_xy, c_planes_xz, c_planes_yz)
+        rgb[nonzero_mask] = rgb_nonzero
+        rgb = rgb.reshape(*p_shape[0:2], 3)
 
-        x = self.conv1(x)
-        conv1_out = x
-        x = self.conv2(x)
-        conv2_out = x
-        x = self.conv3(x)
+        rendered_rgb = torch.sum(weights[..., None] * rgb, -2)
+        rendered_depth = torch.sum(weights * z_vals, -1)
 
-        x = self.t_conv1(x)
-        x = self.t_conv2(torch.cat([x, conv2_out], dim=1))
-        x = self.t_conv3(torch.cat([x, conv1_out], dim=1))
-
-        x = self.conv_out(torch.cat([x, input], dim=1))
-
-        return x
+        return rendered_depth, rendered_rgb, sdf

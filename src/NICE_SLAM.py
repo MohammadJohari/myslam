@@ -35,6 +35,8 @@ class NICE_SLAM():
         self.verbose = cfg['verbose']
         self.dataset = cfg['dataset']
         self.coarse_bound_enlarge = cfg['model']['coarse_bound_enlarge']
+        self.truncation = cfg['model']['truncation']
+
         if args.output is None:
             self.output = cfg['data']['output']
         else:
@@ -97,9 +99,6 @@ class NICE_SLAM():
         self.shared_decoders = self.shared_decoders.to(
             self.cfg['mapping']['device'])
         self.shared_decoders.share_memory()
-        
-        ## New params
-        self.truncation = 0.08
 
         self.renderer = Renderer(cfg, args, self)
         self.mesher = Mesher(cfg, args, self)

@@ -331,20 +331,9 @@ class Mesher(object):
             mask_z = (pi[:, 2] < bound[2][1]) & (pi[:, 2] > bound[2][0])
             mask = mask_x & mask_y & mask_z
 
-            pi = pi.unsqueeze(0)
-            if self.nice:
-                ret, fine_raw = decoders(pi, all_planes=all_planes, stage=stage)
-                # untouched = fine_raw.abs().sum(dim=-1) != 0
-                # untouched = (fine_raw == 0.01).float().mean(dim=-1) != 1
-                # mask &= untouched
-            else:
-                ret = decoders(pi, c_grid=None)
-            ret = ret.squeeze(0)
-            if len(ret.shape) == 1 and ret.shape[0] == 4:
-                ret = ret.unsqueeze(0)
+            ret = decoders.get_only_raw(pi, all_planes=all_planes)
 
-            # ret[~mask, 3] = 100
-            ret[~mask, 3] = -1
+            ret[~mask, -1] = -1
             rets.append(ret)
 
         ret = torch.cat(rets, dim=0)
