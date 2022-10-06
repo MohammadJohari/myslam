@@ -77,6 +77,7 @@ if __name__ == '__main__':
             whole = cv2.resize(whole, (W//4, H//4))
             cv2.imshow(f'Input RGB-D Sequence', whole[:, :, ::-1])
             cv2.waitKey(1)
+        # time.sleep(0.15)
         time.sleep(0.05)
         meshfile = f'{output}/mesh/{i:05d}_mesh.ply'
         if os.path.isfile(meshfile):

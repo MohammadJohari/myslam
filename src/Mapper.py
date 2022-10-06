@@ -260,7 +260,7 @@ class Mapper(object):
         H, W, fx, fy, cx, cy = self.H, self.W, self.fx, self.fy, self.cx, self.cy
 
         rays_o, rays_d, gt_depth, gt_color = get_samples(
-            0, H, 0, W, pixels, H, W, fx, fy, cx, cy, c2w, gt_depth, gt_color, self.device)
+            0, H, 0, W, pixels, H, W, fx, fy, cx, cy, c2w.unsqueeze(0), gt_depth.unsqueeze(0), gt_color.unsqueeze(0), self.device)
 
         gt_depth = gt_depth.reshape(-1, 1)
         gt_depth = gt_depth.repeat(1, N_samples)
@@ -296,12 +296,23 @@ class Mapper(object):
             list_keyframe.append(
                 {'id': keyframeid, 'percent_inside': percent_inside})
 
+        # list_keyframe = sorted(
+        #     list_keyframe, key=lambda i: i['percent_inside'], reverse=True)
+        # selected_keyframe_list = [dic['id']
+        #                           for dic in list_keyframe if dic['percent_inside'] > 0.00]
+        # selected_keyframe_list = list(np.random.permutation(
+        #     np.array(selected_keyframe_list))[:k])
+
         list_keyframe = sorted(
-            list_keyframe, key=lambda i: i['percent_inside'], reverse=True)
-        selected_keyframe_list = [dic['id']
-                                  for dic in list_keyframe if dic['percent_inside'] > 0.00]
-        selected_keyframe_list = list(np.random.permutation(
-            np.array(selected_keyframe_list))[:k])
+            list_keyframe, key=lambda i: i['percent_inside'], reverse=False)
+        selected_keyframe_list = [dic['id'] for dic in list_keyframe if dic['percent_inside'] == 0.00]
+        zero_overlap_num = len(selected_keyframe_list)
+        if k <= zero_overlap_num:
+            selected_keyframe_list = list(np.random.permutation(
+                np.array(selected_keyframe_list))[:k])
+        else:
+            selected_keyframe_list += [dic['id'] for dic in list_keyframe[zero_overlap_num:k]]
+
         return selected_keyframe_list
 
     def optimize_map(self, num_joint_iters, lr_factor, idx, cur_gt_color, cur_gt_depth, gt_cur_c2w, keyframe_dict, keyframe_list, cur_c2w, wandb_q):
@@ -336,14 +347,14 @@ class Mapper(object):
                 num = self.mapping_window_size-2
                 optimize_frame = random_select(len(self.keyframe_dict)-1, num)
             elif self.keyframe_selection_method == 'overlap':
-                num = self.mapping_window_size-2
+                num = self.mapping_window_size-3
                 optimize_frame = self.keyframe_selection_overlap(
-                    cur_gt_color, cur_gt_depth, cur_c2w, keyframe_dict[:-1], num)
+                    cur_gt_color, cur_gt_depth, cur_c2w, keyframe_dict[:-2], num)
 
         # add the last keyframe and the current frame(use -1 to denote)
         oldest_frame = None
         if len(keyframe_list) > 0:
-            optimize_frame = optimize_frame + [len(keyframe_list)-1]
+            optimize_frame = optimize_frame + [len(keyframe_list)-1] + [len(keyframe_list)-2]
             optimize_frame = sorted(optimize_frame)
             oldest_frame = min(optimize_frame)
         optimize_frame += [-1]
@@ -388,31 +399,32 @@ class Mapper(object):
         gt_c2ws = []
         for frame in optimize_frame:
             # the oldest frame should be fixed to avoid drifting
-            if frame != oldest_frame:
-                if frame != -1:
-                    gt_depths.append(keyframe_dict[frame]['depth'])
-                    gt_colors.append(keyframe_dict[frame]['color'])
-                    c2ws.append(keyframe_dict[frame]['est_c2w'])
-                    gt_c2ws.append(keyframe_dict[frame]['gt_c2w'])
-                else:
-                    gt_depths.append(cur_gt_depth)
-                    gt_colors.append(cur_gt_color)
-                    c2ws.append(cur_c2w)
-                    gt_c2ws.append(gt_cur_c2w)
+            # if frame != oldest_frame:
+            if frame != -1:
+                gt_depths.append(keyframe_dict[frame]['depth'])
+                gt_colors.append(keyframe_dict[frame]['color'])
+                c2ws.append(keyframe_dict[frame]['est_c2w'])
+                gt_c2ws.append(keyframe_dict[frame]['gt_c2w'])
+            else:
+                gt_depths.append(cur_gt_depth)
+                gt_colors.append(cur_gt_color)
+                c2ws.append(cur_c2w)
+                gt_c2ws.append(gt_cur_c2w)
         gt_depths = torch.stack(gt_depths, dim=0)
         gt_colors = torch.stack(gt_colors, dim=0)
         c2ws = torch.stack(c2ws, dim=0)
         gt_c2ws = torch.stack(gt_c2ws, dim=0)
 
         if self.BA:
-            pose6ds = Variable(matrix_to_pose6d(c2ws[-1:]), requires_grad=True)
+            pose6ds = Variable(matrix_to_pose6d(c2ws[1:]), requires_grad=True)
+            noise = Variable(torch.empty(pose6ds.shape, device=self.device).normal_(mean=0, std=0.00001), requires_grad=True)
             # gt_pose6ds = matrix_to_pose6d(gt_c2ws)
 
             # The corresponding lr will be set according to which stage the optimization is in
             optimizer = Adam([{'params': decoders_para_list, 'lr': 0},
                               {'params': planes_para, 'lr': 0},
                               {'params': c_planes_para, 'lr': 0},
-                              {'params': [pose6ds], 'lr': 0, 'betas':(0.5, 0.999)}])
+                              {'params': [pose6ds] + [noise], 'lr': 0, 'betas':(0.5, 0.999)}])
         else:
             optimizer = Adam([{'params': decoders_para_list, 'lr': 0},
                               {'params': planes_para, 'lr': 0},
@@ -438,7 +450,7 @@ class Mapper(object):
             # with torch.autocast(device_type='cuda', dtype=torch.bfloat16):
             if self.BA:
                 # c2ws[1:] = pose6d_to_matrix(pose6ds)
-                c2ws_ = torch.cat([c2ws[0:-1], pose6d_to_matrix(pose6ds)], dim=0)
+                c2ws_ = torch.cat([c2ws[0:1], pose6d_to_matrix(pose6ds + noise * torch.randint(2, [1], device=self.device))], dim=0)
                 # c2ws = pose6d_to_matrix(pose6ds)
                 # c2ws[:-1] = c2ws[:-1].detach()
             else:
@@ -469,12 +481,21 @@ class Mapper(object):
                 0, H, 0, W, pixs_per_image, H, W, fx, fy, cx, cy, c2ws_, gt_depths, gt_colors, self.device)
 
 
-
-            # ret = self.renderer.render_batch_ray(c, self.decoders, batch_rays_d,
-            #                                      batch_rays_o, device, self.stage, self.truncation,
-            #                                      gt_depth=None if self.coarse_mapper else batch_gt_depth)
-            # depth, uncertainty, color, entr, sdf, z_vals = ret
-
+            if self.nice:
+                # should pre-filter those out of bounding box depth value
+                with torch.no_grad():
+                    det_rays_o = batch_rays_o.clone().detach().unsqueeze(-1)  # (N, 3, 1)
+                    det_rays_d = batch_rays_d.clone().detach().unsqueeze(-1)  # (N, 3, 1)
+                    t = (self.bound.unsqueeze(0).to(
+                        device)-det_rays_o)/det_rays_d
+                    t, _ = torch.min(torch.max(t, dim=2)[0], dim=1)
+                    inside_mask = t >= batch_gt_depth
+                # if inside_mask.float().mean() < (1.0 - 1e-6):
+                #     breakpoint()
+                batch_rays_d = batch_rays_d[inside_mask]
+                batch_rays_o = batch_rays_o[inside_mask]
+                batch_gt_depth = batch_gt_depth[inside_mask]
+                batch_gt_color = batch_gt_color[inside_mask]
 
             ret = self.renderer.no_render_batch_ray(all_planes, self.decoders, batch_rays_d,
                                                     batch_rays_o, device, self.stage, self.truncation,
@@ -489,6 +510,19 @@ class Mapper(object):
                 color_loss = torch.square(batch_gt_color - color).mean()
                 weighted_color_loss = self.w_color_loss * color_loss
                 loss += weighted_color_loss
+
+            ### Depth loss
+            loss = loss + 10 * torch.square(batch_gt_depth[depth_mask] - depth[depth_mask]).mean()
+
+            ## TV loss
+            # for planes in all_planes[:3]:
+            #     for plane in planes:
+            #         tv1 = torch.pow((plane[..., 1:] - plane[..., :-1]), 2).sum()
+            #         tv2 = torch.pow((plane[..., 1:, :] - plane[..., :-1, :]), 2).sum()
+            #         loss = loss + 0.01 * (tv1 + tv2)
+
+            # ## Stupid loss function
+            # loss = loss + 5 * torch.mean(torch.square(sdf - torch.ones_like(sdf)))
 
             # regulation_loss = entr[~depth_mask].mean()
             # regulation_loss = entr.mean()
@@ -554,7 +588,7 @@ class Mapper(object):
             optimized_c2ws = pose6d_to_matrix(pose6ds.detach())
 
             camera_tensor_id = 0
-            for frame in optimize_frame[-1:]:
+            for frame in optimize_frame[1:]:
                 if frame != -1:
                     keyframe_dict[frame]['est_c2w'] = optimized_c2ws[camera_tensor_id]
                     camera_tensor_id += 1

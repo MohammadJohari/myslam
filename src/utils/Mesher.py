@@ -363,7 +363,7 @@ class Mesher(object):
         z = np.linspace(bound[2][0] - padding, bound[2][1] + padding, nsteps_z)
         
         xx, yy, zz = np.meshgrid(x, y, z)
-        grid_points = np.vstack([xx.ravel(), yy.ravel(), zz.ravel()]).T
+        xx, yy, zz = xx.astype(np.float32), yy.astype(np.float32), zz.astype(np.float32)
         grid_points = torch.tensor(np.vstack(
             [xx.ravel(), yy.ravel(), zz.ravel()]).T,
             dtype=torch.float)

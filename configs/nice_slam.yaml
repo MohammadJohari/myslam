@@ -1,7 +1,7 @@
 coarse: False
 sync_method: strict
 scale: 1
-verbose: False
+verbose: True
 occupancy: False
 low_gpu_mem: False
 grid_len:
@@ -15,8 +15,8 @@ pretrained_decoders:
   middle_fine: pretrained/middle_fine.pt # one ckpt contain both middle and fine
 meshing:
   level_set: 0
-  resolution: 0.01 # change to 512 for higher resolution geometry
-  eval_rec: False
+  resolution: 0.03 # change to 512 for higher resolution geometry
+  eval_rec: True
   clean_mesh: False
   depth_test: False
   mesh_coarse_level: False

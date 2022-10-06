@@ -91,8 +91,9 @@ def draw_trajectory(queue, output, init_pose, cam_scale,
                     if draw_trajectory.mesh is not None:
                         vis.remove_geometry(draw_trajectory.mesh)
                     draw_trajectory.mesh = o3d.io.read_triangle_mesh(meshfile)
+                    ## Sepehr: Commenting fliping normals
                     draw_trajectory.mesh.compute_vertex_normals()
-                    # flip face orientation
+                    ### flip face orientation
                     new_triangles = np.asarray(
                         draw_trajectory.mesh.triangles)[:, ::-1]
                     draw_trajectory.mesh.triangles = o3d.utility.Vector3iVector(

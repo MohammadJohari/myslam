@@ -231,7 +231,7 @@ class ScanNet(BaseDataset):
     def __init__(self, cfg, args, scale, device='cuda:0'
                  ):
         super(ScanNet, self).__init__(cfg, args, scale, device)
-        self.input_folder = os.path.join(self.input_folder, 'frames')
+        # self.input_folder = os.path.join(self.input_folder, 'frames')
         self.color_paths = sorted(glob.glob(os.path.join(
             self.input_folder, 'color', '*.jpg')), key=lambda x: int(os.path.basename(x)[:-4]))
         self.depth_paths = sorted(glob.glob(os.path.join(
@@ -255,6 +255,12 @@ class ScanNet(BaseDataset):
             c2w[:3, 2] *= -1
             c2w = torch.from_numpy(c2w).float()
             self.poses.append(c2w)
+
+        # from src.common import (get_samples, random_select, matrix_to_pose6d, pose6d_to_matrix)
+        # c2ws = torch.stack(self.poses, dim=0)
+        # poses = matrix_to_pose6d(c2ws)
+        # diff = poses[1:] - poses[:-1]
+        # breakpoint()
 
 
 class CoFusion(BaseDataset):

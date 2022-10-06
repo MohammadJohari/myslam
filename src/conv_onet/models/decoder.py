@@ -825,8 +825,11 @@ class MyNICE(nn.Module):
         weights = torch.sigmoid(self.sharpness * sdf) * torch.sigmoid(-self.sharpness * sdf)
 
         with torch.no_grad():
-            signs = sdf[:, 1:] * sdf[:, :-1]
-            mask = torch.where(signs < 0.0, torch.ones_like(signs), torch.zeros_like(signs))
+            # signs = sdf[:, 1:] * sdf[:, :-1]
+            mask = torch.where(sdf < -0.01, torch.ones_like(sdf), torch.zeros_like(sdf))
+            mask[:, -1] = 1
+            # mask = torch.where(signs < 0.0, torch.ones_like(signs), torch.zeros_like(signs))
+            # mask = torch.cat([mask, torch.ones([mask.shape[0], 1], device=mask.device)], dim=1)
             inds = torch.argmax(mask, dim=1)
             inds = inds[..., None]
             z_min = torch.gather(z_vals, 1, inds) # The first surface

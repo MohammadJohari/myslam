@@ -2,7 +2,7 @@ import os
 import torch
 import numpy as np
 import matplotlib.pyplot as plt
-from src.common import matrix_to_pose6d
+from src.common import pose6d_to_matrix
 
 
 class Visualizer(object):
@@ -41,8 +41,9 @@ class Visualizer(object):
                 gt_depth_np = gt_depth.squeeze(0).cpu().numpy()
                 gt_color_np = gt_color.squeeze(0).cpu().numpy()
 
-                if len(c2w_or_camera_tensor.shape) == 1:
-                    c2w = matrix_to_pose6d(c2w_or_camera_tensor.detach()).squeeze()
+                # if len(c2w_or_camera_tensor.shape) == 1:
+                if c2w_or_camera_tensor.shape[-1] > 4: ## 6od
+                    c2w = pose6d_to_matrix(c2w_or_camera_tensor.detach()).squeeze()
                     # bottom = torch.from_numpy(
                     #     np.array([0, 0, 0, 1.]).reshape([1, 4])).type(
                     #         torch.float32).to(self.device)
@@ -75,6 +76,17 @@ class Visualizer(object):
                 fig, axs = plt.subplots(2, 3)
                 fig.tight_layout()
                 max_depth = np.max(gt_depth_np)
+
+
+                color_np[:20] = 0
+                color_np[:, :20] = 0
+                color_np[-20:] = 0
+                color_np[:, -20:] = 0
+                depth_np[:20] = 0
+                depth_np[:, :20] = 0
+                depth_np[-20:] = 0
+                depth_np[:, -20:] = 0
+
 
                 axs[0, 0].imshow(gt_depth_np, cmap="plasma",
                                  vmin=0, vmax=max_depth)
