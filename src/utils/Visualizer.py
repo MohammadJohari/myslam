@@ -77,17 +77,6 @@ class Visualizer(object):
                 fig.tight_layout()
                 max_depth = np.max(gt_depth_np)
 
-
-                color_np[:20] = 0
-                color_np[:, :20] = 0
-                color_np[-20:] = 0
-                color_np[:, -20:] = 0
-                depth_np[:20] = 0
-                depth_np[:, :20] = 0
-                depth_np[-20:] = 0
-                depth_np[:, -20:] = 0
-
-
                 axs[0, 0].imshow(gt_depth_np, cmap="plasma",
                                  vmin=0, vmax=max_depth)
                 axs[0, 0].set_title('Input Depth')

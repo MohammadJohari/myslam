@@ -118,6 +118,6 @@ data:
   dim: 3
 model:
   c_dim: 32
-  truncation: 0.08
+  truncation: 0.06
   coarse_bound_enlarge: 2
   pos_embedding_method: fourier

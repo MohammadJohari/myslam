@@ -91,7 +91,7 @@ class Tracker(object):
 
         self.optimizer_state = None
 
-        self.noise = torch.empty([1, 7]).normal_(mean=0, std=0.001).to(self.device)
+        # self.noise = torch.empty([1, 7]).normal_(mean=0, std=0.001).to(self.device)
 
     # def sdf_loss(self, sdf, z_vals, gt_depth):
     #     front_mask = torch.where(z_vals < (gt_depth[:, None] - self.truncation), torch.ones_like(z_vals), torch.zeros_like(z_vals)).bool()
@@ -125,7 +125,7 @@ class Tracker(object):
         # return 10 * fs_loss + 200 * center_loss + 1 * tail_loss
         return 10 * fs_loss + 200 * center_loss + 10 * tail_loss
 
-    def optimize_cam_in_batch(self, pose6d, gt_color, gt_depth, batch_size, optimizer, pre_pose6d=None, noise=0):
+    def optimize_cam_in_batch(self, iter, pose6d, gt_color, gt_depth, batch_size, optimizer, pre_pose6d=None, noise=0):
         """
         Do one iteration of camera iteration. Sample pixels, render depth/color, calculate loss and backpropagation.
 
@@ -183,15 +183,19 @@ class Tracker(object):
         depth_diff = (batch_gt_depth - depth).abs()
         diff_median = depth_diff[depth_mask].median()
         good_mask = (depth_diff < 10 * diff_median) & depth_mask
-        loss = self.sdf_loss(sdf[good_mask], z_vals[good_mask], batch_gt_depth[good_mask])
 
-        if self.use_color_in_tracking:
-            color_loss = torch.square(
-                batch_gt_color - color)[good_mask].mean()
-            loss += self.w_color_loss*color_loss
+        if iter > -1:
+            loss = self.sdf_loss(sdf[good_mask], z_vals[good_mask], batch_gt_depth[good_mask])
+
+            if self.use_color_in_tracking:
+                color_loss = torch.square(
+                    batch_gt_color - color)[good_mask].mean()
+                loss += self.w_color_loss * color_loss
+        else:
+            loss = 0
 
         ### Depth loss
-        loss = loss + 10 * torch.square(batch_gt_depth[good_mask] - depth[good_mask]).mean()
+        loss = loss + 0.1 * torch.square(batch_gt_depth[good_mask] - depth[good_mask]).mean()
 
         ## Super Stupid
         # if not pre_pose6d is None:
@@ -305,22 +309,21 @@ class Tracker(object):
                 #     pre_pose6d = None
 
                 if self.seperate_LR:
-                    camera_tensor = camera_tensor.to(device).detach()
-                    T = camera_tensor[-3:]
-                    quad = camera_tensor[:4]
-                    cam_para_list_quad = [quad]
+                    T = pose6d[:, -3:]
+                    quad = pose6d[:,:4]
                     quad = Variable(quad, requires_grad=True)
                     T = Variable(T, requires_grad=True)
-                    camera_tensor = torch.cat([quad, T], 0)
+                    pose6d = torch.cat([quad, T], -1)
                     cam_para_list_T = [T]
                     cam_para_list_quad = [quad]
-                    optimizer_camera = torch.optim.Adam([{'params': cam_para_list_T, 'lr': self.cam_lr},
-                                                         {'params': cam_para_list_quad, 'lr': self.cam_lr*0.2}])
+                    optimizer_camera = torch.optim.Adam([{'params': cam_para_list_T, 'lr': self.cam_lr, 'betas':(0.5, 0.999)},
+                                                         {'params': cam_para_list_quad, 'lr': self.cam_lr * 0.2, 'betas':(0.5, 0.999)}])
                 else:
                     pose6d = Variable(pose6d, requires_grad=True)
                     # noise = Variable(self.noise, requires_grad=True)
-                    noise = Variable(torch.empty([1, 7], device=self.device).normal_(mean=0, std=0.00001), requires_grad=True)
-                    cam_para_list = [pose6d] + [noise]
+                    # noise = Variable(torch.empty([1, 7], device=self.device).normal_(mean=0, std=0.00001), requires_grad=True)
+                    noise_sigma = Variable(0.00001 * torch.ones_like(pose6d, device=self.device), requires_grad=True)
+                    cam_para_list = [pose6d] + [noise_sigma]
                     optimizer_camera = torch.optim.Adam(cam_para_list, lr=self.cam_lr, betas=(0.5, 0.999))
 
                 # if not self.optimizer_state is None:
@@ -332,12 +335,14 @@ class Tracker(object):
                 current_min_loss = 10000000000.
                 for cam_iter in range(self.num_cam_iters):
                     if self.seperate_LR:
-                        camera_tensor = torch.cat([quad, T], 0).to(self.device)
+                        pose6d = torch.cat([quad, T], -1)
 
                     self.visualizer.vis(idx, cam_iter, gt_depth, gt_color, pose6d, all_planes, self.decoders, wandb_q)
 
-                    loss = self.optimize_cam_in_batch(pose6d, gt_color, gt_depth, self.tracking_pixels,
-                                                      optimizer_camera, pre_pose6d, noise * torch.randint(2, [1], device=self.device))
+                    # noise = noise_sigma * torch.randn_like(pose6d, device=self.device) * torch.randint(2, [1], device=self.device)
+                    noise = 0
+                    loss = self.optimize_cam_in_batch(cam_iter, pose6d, gt_color, gt_depth, self.tracking_pixels,
+                                                      optimizer_camera, pre_pose6d, noise)
 
                     if cam_iter == 0:
                         initial_loss = loss
@@ -349,6 +354,8 @@ class Tracker(object):
                                 f'Re-rendering loss: {initial_loss:.2f}->{loss:.2f} ' +
                                 f'camera tensor error: {initial_loss_camera_tensor:.4f}->{loss_camera_tensor:.4f}')
 
+
+                            # wandb_q.put(({"Noise Sigma": noise_sigma.detach().abs().mean().item()}, idx))
 
                             wandb_q.put(({"Tracking Loss (Before)": initial_loss, "Tracking Loss (After)": loss}, idx))
                             wandb_q.put(({

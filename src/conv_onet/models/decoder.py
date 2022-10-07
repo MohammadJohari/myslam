@@ -841,6 +841,22 @@ class MyNICE(nn.Module):
 
         return weights
 
+    # def sample_plane_feature(self, p_nor, planes_xy, planes_xz, planes_yz, act=True):
+    #     vgrid = p_nor[None, :, None]
+    #
+    #     feat = []
+    #     for i in range(len(planes_xy)):
+    #         xy = F.grid_sample(planes_xy[i], vgrid[..., [0, 1]], padding_mode='border', align_corners=True, mode='bilinear').squeeze().transpose(0, 1)
+    #         xz = F.grid_sample(planes_xz[i], vgrid[..., [0, 2]], padding_mode='border', align_corners=True, mode='bilinear').squeeze().transpose(0, 1)
+    #         yz = F.grid_sample(planes_yz[i], vgrid[..., [1, 2]], padding_mode='border', align_corners=True, mode='bilinear').squeeze().transpose(0, 1)
+    #         if act:
+    #             feat.append(F.relu(xy + xz + yz, inplace=True))
+    #         else:
+    #             feat.append(xy + xz + yz)
+    #     feat = torch.cat(feat, dim=-1)
+    #
+    #     return feat
+
     def sample_plane_feature(self, p_nor, planes_xy, planes_xz, planes_yz, act=True):
         vgrid = p_nor[None, :, None]
 

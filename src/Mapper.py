@@ -417,14 +417,16 @@ class Mapper(object):
 
         if self.BA:
             pose6ds = Variable(matrix_to_pose6d(c2ws[1:]), requires_grad=True)
-            noise = Variable(torch.empty(pose6ds.shape, device=self.device).normal_(mean=0, std=0.00001), requires_grad=True)
+            # noise = Variable(torch.empty(pose6ds.shape, device=self.device).normal_(mean=0, std=0.00001), requires_grad=True)
+            noise_sigma = Variable(0.00001 * torch.ones_like(pose6ds, device=self.device), requires_grad=True)
+
             # gt_pose6ds = matrix_to_pose6d(gt_c2ws)
 
             # The corresponding lr will be set according to which stage the optimization is in
             optimizer = Adam([{'params': decoders_para_list, 'lr': 0},
                               {'params': planes_para, 'lr': 0},
                               {'params': c_planes_para, 'lr': 0},
-                              {'params': [pose6ds] + [noise], 'lr': 0, 'betas':(0.5, 0.999)}])
+                              {'params': [pose6ds] + [noise_sigma], 'lr': 0, 'betas':(0.5, 0.999)}])
         else:
             optimizer = Adam([{'params': decoders_para_list, 'lr': 0},
                               {'params': planes_para, 'lr': 0},
@@ -449,8 +451,9 @@ class Mapper(object):
 
             # with torch.autocast(device_type='cuda', dtype=torch.bfloat16):
             if self.BA:
-                # c2ws[1:] = pose6d_to_matrix(pose6ds)
-                c2ws_ = torch.cat([c2ws[0:1], pose6d_to_matrix(pose6ds + noise * torch.randint(2, [1], device=self.device))], dim=0)
+                # noise = noise_sigma * torch.randn_like(pose6ds, device=self.device) * torch.randint(2, [1], device=self.device)
+                noise = 0
+                c2ws_ = torch.cat([c2ws[0:1], pose6d_to_matrix(pose6ds + noise)], dim=0)
                 # c2ws = pose6d_to_matrix(pose6ds)
                 # c2ws[:-1] = c2ws[:-1].detach()
             else:
@@ -512,7 +515,7 @@ class Mapper(object):
                 loss += weighted_color_loss
 
             ### Depth loss
-            loss = loss + 10 * torch.square(batch_gt_depth[depth_mask] - depth[depth_mask]).mean()
+            loss = loss + 0.1 * torch.square(batch_gt_depth[depth_mask] - depth[depth_mask]).mean()
 
             ## TV loss
             # for planes in all_planes[:3]:
