@@ -15,7 +15,7 @@ pretrained_decoders:
   middle_fine: pretrained/middle_fine.pt # one ckpt contain both middle and fine
 meshing:
   level_set: 0
-  resolution: 0.03 # change to 512 for higher resolution geometry
+  resolution: 0.01 # change to 512 for higher resolution geometry
   eval_rec: True
   clean_mesh: False
   depth_test: False

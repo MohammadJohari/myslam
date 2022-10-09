@@ -1,4 +1,7 @@
 dataset: 'scannet'
+meshing:
+  eval_rec: True
+  resolution: 0.02
 tracking:
   vis_freq: 4000000
   vis_inside_freq: 25
@@ -18,7 +21,7 @@ mapping:
   keyframe_every: 4
   mapping_window_size: 10
   pixels: 4000
-  iters_first: 500
+  iters_first: 1000
   iters: 30
 cam: 
   H: 480 

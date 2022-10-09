@@ -417,16 +417,13 @@ class Mapper(object):
 
         if self.BA:
             pose6ds = Variable(matrix_to_pose6d(c2ws[1:]), requires_grad=True)
-            # noise = Variable(torch.empty(pose6ds.shape, device=self.device).normal_(mean=0, std=0.00001), requires_grad=True)
-            noise_sigma = Variable(0.00001 * torch.ones_like(pose6ds, device=self.device), requires_grad=True)
-
             # gt_pose6ds = matrix_to_pose6d(gt_c2ws)
 
             # The corresponding lr will be set according to which stage the optimization is in
             optimizer = Adam([{'params': decoders_para_list, 'lr': 0},
                               {'params': planes_para, 'lr': 0},
                               {'params': c_planes_para, 'lr': 0},
-                              {'params': [pose6ds] + [noise_sigma], 'lr': 0, 'betas':(0.5, 0.999)}])
+                              {'params': [pose6ds], 'lr': 0, 'betas':(0.5, 0.999)}])
         else:
             optimizer = Adam([{'params': decoders_para_list, 'lr': 0},
                               {'params': planes_para, 'lr': 0},
@@ -451,9 +448,7 @@ class Mapper(object):
 
             # with torch.autocast(device_type='cuda', dtype=torch.bfloat16):
             if self.BA:
-                # noise = noise_sigma * torch.randn_like(pose6ds, device=self.device) * torch.randint(2, [1], device=self.device)
-                noise = 0
-                c2ws_ = torch.cat([c2ws[0:1], pose6d_to_matrix(pose6ds + noise)], dim=0)
+                c2ws_ = torch.cat([c2ws[0:1], pose6d_to_matrix(pose6ds)], dim=0)
                 # c2ws = pose6d_to_matrix(pose6ds)
                 # c2ws[:-1] = c2ws[:-1].detach()
             else:
@@ -733,13 +728,7 @@ class Mapper(object):
                                              self.estimate_c2w_list, idx, self.device, show_forecast=False,
                                              clean_mesh=self.clean_mesh, get_mask_use_all_frames=True)
 
-                        cull_mesh(mesh_out_file, self.cfg, self.args, self.device)
-
-                        # from zipfile import ZipFile
-                        # import zipfile
-                        # zip_file = f'{self.output}/mesh/final_mesh_eval_rec.zip'
-                        # with ZipFile(zip_file, 'w') as zipf:
-                        #     zipf.write(mesh_out_file, compression=zipfile.ZIP_DEFLATED)
+                        cull_mesh(mesh_out_file, self.cfg, self.args, self.device, gt_camera=False)
 
                     break
 

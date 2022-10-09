@@ -102,7 +102,6 @@ def calc_3d_metric(rec_meshfile, gt_meshfile, align=True):
 
     rec_pc = trimesh.sample.sample_surface(mesh_rec, 400000)
     rec_pc_tri = trimesh.PointCloud(vertices=rec_pc[0])
-
     gt_pc = trimesh.sample.sample_surface(mesh_gt, 400000)
     gt_pc_tri = trimesh.PointCloud(vertices=gt_pc[0])
     accuracy_rec = accuracy(gt_pc_tri.vertices, rec_pc_tri.vertices)

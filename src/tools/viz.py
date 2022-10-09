@@ -91,15 +91,15 @@ def draw_trajectory(queue, output, init_pose, cam_scale,
                     if draw_trajectory.mesh is not None:
                         vis.remove_geometry(draw_trajectory.mesh)
                     draw_trajectory.mesh = o3d.io.read_triangle_mesh(meshfile)
-                    ## Sepehr: Commenting fliping normals
-                    draw_trajectory.mesh.compute_vertex_normals()
-                    ### flip face orientation
-                    new_triangles = np.asarray(
-                        draw_trajectory.mesh.triangles)[:, ::-1]
-                    draw_trajectory.mesh.triangles = o3d.utility.Vector3iVector(
-                        new_triangles)
-                    draw_trajectory.mesh.triangle_normals = o3d.utility.Vector3dVector(
-                        -np.asarray(draw_trajectory.mesh.triangle_normals))
+                    ##### Sepehr: Commenting fliping normals
+                    # draw_trajectory.mesh.compute_vertex_normals()
+                    # ### flip face orientation
+                    # new_triangles = np.asarray(
+                    #     draw_trajectory.mesh.triangles)[:, ::-1]
+                    # draw_trajectory.mesh.triangles = o3d.utility.Vector3iVector(
+                    #     new_triangles)
+                    # draw_trajectory.mesh.triangle_normals = o3d.utility.Vector3dVector(
+                    #     -np.asarray(draw_trajectory.mesh.triangle_normals))
                     vis.add_geometry(draw_trajectory.mesh)
 
                 elif data[0] == 'traj':
@@ -166,7 +166,8 @@ def draw_trajectory(queue, output, init_pose, cam_scale,
 
     # set the viewer's pose in the back of the first frame's pose
     param = ctr.convert_to_pinhole_camera_parameters()
-    init_pose[:3, 3] += 2*normalize(init_pose[:3, 2])
+    ## Zooming level
+    init_pose[:3, 3] += 6 * normalize(init_pose[:3, 2])
     init_pose[:3, 2] *= -1
     init_pose[:3, 1] *= -1
     init_pose = np.linalg.inv(init_pose)

@@ -1,6 +1,7 @@
 dataset: 'replica'
 meshing:
   eval_rec: True
+  resolution: 0.01
 tracking:
   vis_freq: 400000000
   vis_inside_freq: 25

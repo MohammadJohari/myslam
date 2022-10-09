@@ -1,9 +1,9 @@
 inherit_from: configs/Replica/replica.yaml
 mapping:
-#  bound: [[-7.0,2.8],[-4.6,4.3],[-3.0,2.9]]
-  bound: [[-5.5,1.3],[-3.1,2.8],[-1.5,1.4]]
+  bound: [[-7.0,2.8],[-4.6,4.3],[-3.0,2.9]]
+#  bound: [[-5.5,1.3],[-3.1,2.8],[-1.5,1.4]]
   marching_cubes_bound: [[-5.5,1.3],[-3.1,2.8],[-1.5,1.4]]
 data:
   input_folder: /idiap/resource/database/ETHZ-Replica/room1
-  output: /idiap/temp/mjohari/outputs/slam/Replica/r1_sanity_dl001_t06
+  output: /idiap/temp/mjohari/outputs/slam/Replica/r1_sanity_dl01_t06_bound_hr
 #  output: /idiap/temp/mjohari/outputs/slam/Replica/r1_nice

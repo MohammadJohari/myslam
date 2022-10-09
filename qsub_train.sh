@@ -9,8 +9,9 @@ export CUDA_VISIBLE_DEVICES=0
 grid_gpu="-l sgpu -l h=vgn[ji]*"
 grid_args="${grid_gpu} -P ams -S $(which python3) -cwd -V"
 
-#python_command="run.py configs/Replica/room1.yaml"
-python_command="run.py configs/ScanNet/scene0000.yaml"
+output='/idiap/temp/mjohari/outputs/slam/Replica/r0_ncoa'
+#python_command="run.py configs/Replica/room0.yaml --output "
+python_command="run.py configs/ScanNet/scene0059.yaml"
 # python_command="run.py configs/Apartment/apartment.yaml"
 
 expname="o0_sigin"
