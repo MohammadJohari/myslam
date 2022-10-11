@@ -12,7 +12,7 @@ sys.path.append('.')
 from src.utils.datasets import get_dataset
 from src import config
 
-def cull_mesh(mesh_file, cfg, args, device, gt_camera=True):
+def cull_mesh(mesh_file, cfg, args, device, estimate_c2w_list=None):
     frame_reader = get_dataset(cfg, args, 1, device=device)
 
     H, W, fx, fy, cx, cy = cfg['cam']['H'], cfg['cam']['W'], cfg['cam']['fx'], cfg['cam']['fy'], cfg['cam']['cx'], cfg['cam']['cy']
@@ -27,23 +27,11 @@ def cull_mesh(mesh_file, cfg, args, device, gt_camera=True):
 
     pc = mesh.vertices
 
-    if not gt_camera:
-        output = cfg['data']['output']
-        ckptsdir = f'{output}/ckpts'
-
-        if os.path.exists(ckptsdir):
-            ckpts = [os.path.join(ckptsdir, f)
-                     for f in sorted(os.listdir(ckptsdir)) if 'tar' in f]
-            if len(ckpts) > 0:
-                ckpt_path = ckpts[-1]
-                ckpt = torch.load(ckpt_path, map_location='cpu')
-                estimate_c2w_list = ckpt['estimate_c2w_list']
-
     whole_mask = np.ones(pc.shape[0]).astype(np.bool)
     for i in tqdm(range(0, n_imgs, 1)):
         idx, color, depth, c2w = frame_reader[i]
 
-        if not gt_camera:
+        if not estimate_c2w_list is None:
             c2w = estimate_c2w_list[i].to(device)
 
         points = pc.copy()
@@ -100,5 +88,24 @@ if __name__ == '__main__':
     args.input_folder = None
 
     cfg = config.load_config(args.config, 'configs/nice_slam.yaml')
+
+
+
+
+
+
+    # output = cfg['data']['output']
+    # ckptsdir = f'{output}/ckpts'
+    #
+    # if os.path.exists(ckptsdir):
+    #     ckpts = [os.path.join(ckptsdir, f)
+    #              for f in sorted(os.listdir(ckptsdir)) if 'tar' in f]
+    #     if len(ckpts) > 0:
+    #         ckpt_path = ckpts[-1]
+    #         ckpt = torch.load(ckpt_path, map_location='cpu')
+    #         estimate_c2w_list = ckpt['estimate_c2w_list']
+
+
+
 
     cull_mesh(args.input_mesh, cfg, args, 'cuda')

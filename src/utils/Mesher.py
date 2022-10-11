@@ -407,7 +407,7 @@ class Mesher(object):
 
             grid = self.get_grid_uniform(self.resolution)
             points = grid['grid_points']
-            points = points.to(device)
+            # points = points.to(device)
 
             if show_forecast:
                 seen_mask, forecast_mask, unseen_mask = self.point_masks(
@@ -456,14 +456,14 @@ class Mesher(object):
                     mask.append(mesh_bound.contains(pnts.cpu().numpy()))
                 mask = np.concatenate(mask, axis=0)
                 for i, pnts in enumerate(torch.split(points, self.points_batch_size, dim=0)):
-                    z.append(self.eval_points(pnts, all_planes, decoders, 'fine',
+                    z.append(self.eval_points(pnts.to(device), all_planes, decoders, 'fine',
                                               device).cpu().numpy()[:, -1])
 
                 z = np.concatenate(z, axis=0)
                 # z[~mask] = 100
                 z[~mask] = -1
 
-            z = z.astype(np.float32)
+            # z = z.astype(np.float32)
 
             try:
                 if version.parse(

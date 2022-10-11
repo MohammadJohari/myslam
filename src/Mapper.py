@@ -728,7 +728,7 @@ class Mapper(object):
                                              self.estimate_c2w_list, idx, self.device, show_forecast=False,
                                              clean_mesh=self.clean_mesh, get_mask_use_all_frames=True)
 
-                        cull_mesh(mesh_out_file, self.cfg, self.args, self.device, gt_camera=False)
+                        cull_mesh(mesh_out_file, self.cfg, self.args, self.device, estimate_c2w_list=self.estimate_c2w_list)
 
                     break
 
