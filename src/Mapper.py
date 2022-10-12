@@ -240,7 +240,7 @@ class Mapper(object):
 
         return mask
 
-    def keyframe_selection_overlap(self, gt_color, gt_depth, c2w, keyframe_dict, k, N_samples=16, pixels=100):
+    def keyframe_selection_overlap_old(self, gt_color, gt_depth, c2w, keyframe_dict, k, N_samples=16, pixels=100):
         """
         Select overlapping keyframes to the current camera observation.
 
@@ -251,7 +251,7 @@ class Mapper(object):
             keyframe_dict (list): a list containing info for each keyframe.
             k (int): number of overlapping keyframes to select.
             N_samples (int, optional): number of samples/points per ray. Defaults to 16.
-            pixels (int, optional): number of pixels to sparsely sample 
+            pixels (int, optional): number of pixels to sparsely sample
                 from the image of the current camera. Defaults to 100.
         Returns:
             selected_keyframe_list (list): list of selected keyframe id.
@@ -263,6 +263,10 @@ class Mapper(object):
             0, H, 0, W, pixels, H, W, fx, fy, cx, cy, c2w.unsqueeze(0), gt_depth.unsqueeze(0), gt_color.unsqueeze(0), self.device)
 
         gt_depth = gt_depth.reshape(-1, 1)
+        nonzero_depth = gt_depth[:, 0] > 0
+        rays_o = rays_o[nonzero_depth]
+        rays_d = rays_d[nonzero_depth]
+        gt_depth = gt_depth[nonzero_depth]
         gt_depth = gt_depth.repeat(1, N_samples)
         t_vals = torch.linspace(0., 1., steps=N_samples).to(device)
         near = gt_depth*0.8
@@ -270,50 +274,106 @@ class Mapper(object):
         z_vals = near * (1.-t_vals) + far * (t_vals)
         pts = rays_o[..., None, :] + rays_d[..., None, :] * \
             z_vals[..., :, None]  # [N_rays, N_samples, 3]
-        vertices = pts.reshape(-1, 3).cpu().numpy()
+        pts = pts.reshape(-1, 3)
         list_keyframe = []
         for keyframeid, keyframe in enumerate(keyframe_dict):
-            c2w = keyframe['est_c2w'].cpu().numpy()
-            w2c = np.linalg.inv(c2w)
-            ones = np.ones_like(vertices[:, 0]).reshape(-1, 1)
-            homo_vertices = np.concatenate(
-                [vertices, ones], axis=1).reshape(-1, 4, 1)  # (N, 4)
-            cam_cord_homo = w2c@homo_vertices  # (N, 4, 1)=(4,4)*(N, 4, 1)
+            c2w = keyframe['est_c2w'].clone()
+            w2c = torch.inverse(c2w)
+            ones = torch.ones_like(pts[:, 0], device=device).reshape(-1, 1)
+            homo_pts = torch.cat([pts, ones], dim=1).reshape(-1, 4, 1)  # (N, 4)
+            cam_cord_homo = w2c @ homo_pts  # (N, 4, 1)=(4,4)*(N, 4, 1)
             cam_cord = cam_cord_homo[:, :3]  # (N, 3, 1)
-            K = np.array([[fx, .0, cx], [.0, fy, cy],
-                         [.0, .0, 1.0]]).reshape(3, 3)
+            K = torch.tensor([[fx, .0, cx], [.0, fy, cy],
+                          [.0, .0, 1.0]], device=device).reshape(3, 3)
             cam_cord[:, 0] *= -1
-            uv = K@cam_cord
-            z = uv[:, -1:]+1e-5
-            uv = uv[:, :2]/z
-            uv = uv.astype(np.float32)
+            uv = K @ cam_cord
+            z = uv[:, -1:] + 1e-5
+            uv = uv[:, :2] / z
             edge = 20
             mask = (uv[:, 0] < W-edge)*(uv[:, 0] > edge) * \
                 (uv[:, 1] < H-edge)*(uv[:, 1] > edge)
             mask = mask & (z[:, :, 0] < 0)
             mask = mask.reshape(-1)
-            percent_inside = mask.sum()/uv.shape[0]
+            percent_inside = mask.sum() / uv.shape[0]
             list_keyframe.append(
-                {'id': keyframeid, 'percent_inside': percent_inside})
+                {'id': keyframeid, 'percent_inside': percent_inside.item()})
 
-        # list_keyframe = sorted(
-        #     list_keyframe, key=lambda i: i['percent_inside'], reverse=True)
-        # selected_keyframe_list = [dic['id']
-        #                           for dic in list_keyframe if dic['percent_inside'] > 0.00]
-        # selected_keyframe_list = list(np.random.permutation(
-        #     np.array(selected_keyframe_list))[:k])
+        print('old:')
+        print([(dic['id'], dic['percent_inside'])  for dic in list_keyframe])
 
-        list_keyframe = sorted(
-            list_keyframe, key=lambda i: i['percent_inside'], reverse=False)
-        selected_keyframe_list = [dic['id'] for dic in list_keyframe if dic['percent_inside'] == 0.00]
-        zero_overlap_num = len(selected_keyframe_list)
-        if k <= zero_overlap_num:
-            selected_keyframe_list = list(np.random.permutation(
-                np.array(selected_keyframe_list))[:k])
-        else:
-            selected_keyframe_list += [dic['id'] for dic in list_keyframe[zero_overlap_num:k]]
+        selected_keyframe_list = [dic['id'] for dic in list_keyframe if dic['percent_inside'] > 0.00]
+        selected_keyframe_list = list(np.random.permutation(np.array(selected_keyframe_list))[:k])
 
         return selected_keyframe_list
+
+    def keyframe_selection_overlap(self, gt_color, gt_depth, c2w, keyframe_dict, k, N_samples=8, pixels=50):
+        """
+        Select overlapping keyframes to the current camera observation.
+
+        Args:
+            gt_color (tensor): ground truth color image of the current frame.
+            gt_depth (tensor): ground truth depth image of the current frame.
+            c2w (tensor): camera to world matrix (3*4 or 4*4 both fine).
+            keyframe_dict (list): a list containing info for each keyframe.
+            k (int): number of overlapping keyframes to select.
+            N_samples (int, optional): number of samples/points per ray. Defaults to 16.
+            pixels (int, optional): number of pixels to sparsely sample
+                from the image of the current camera. Defaults to 100.
+        Returns:
+            selected_keyframe_list (list): list of selected keyframe id.
+        """
+        device = self.device
+        H, W, fx, fy, cx, cy = self.H, self.W, self.fx, self.fy, self.cx, self.cy
+
+        rays_o, rays_d, gt_depth, gt_color = get_samples(
+            0, H, 0, W, pixels, H, W, fx, fy, cx, cy, c2w.unsqueeze(0), gt_depth.unsqueeze(0), gt_color.unsqueeze(0), self.device)
+
+        gt_depth = gt_depth.reshape(-1, 1)
+        nonzero_depth = gt_depth[:, 0] > 0
+        rays_o = rays_o[nonzero_depth]
+        rays_d = rays_d[nonzero_depth]
+        gt_depth = gt_depth[nonzero_depth]
+        gt_depth = gt_depth.repeat(1, N_samples)
+        t_vals = torch.linspace(0., 1., steps=N_samples).to(device)
+        near = gt_depth*0.8
+        far = gt_depth+0.5
+        z_vals = near * (1.-t_vals) + far * (t_vals)
+        pts = rays_o[..., None, :] + rays_d[..., None, :] * \
+            z_vals[..., :, None]  # [N_rays, N_samples, 3]
+        pts = pts.reshape(1, -1, 3)
+
+        # c2ws = []
+        # for keyframe in keyframe_dict:
+        #     c2ws.append(keyframe['est_c2w'])
+        # c2ws = torch.stack(c2ws, dim=0)
+
+        c2ws = self.rough_key_c2ws.clone()
+        w2cs = torch.inverse(c2ws)
+        ones = torch.ones_like(pts[..., 0], device=device).reshape(1, -1, 1)
+        homo_pts = torch.cat([pts, ones], dim=-1).reshape(1, -1, 4, 1).expand(w2cs.shape[0], -1, -1, -1)
+        w2cs_exp = w2cs.unsqueeze(1).expand(-1, homo_pts.shape[1], -1, -1)
+        cam_cords_homo = w2cs_exp @ homo_pts
+        cam_cords = cam_cords_homo[:, :, :3]
+        K = torch.tensor([[fx, .0, cx], [.0, fy, cy],
+                          [.0, .0, 1.0]], device=device).reshape(3, 3)
+        cam_cords[:, :, 0] *= -1
+        uv = K @ cam_cords
+        z = uv[:, :, -1:] + 1e-5
+        uv = uv[:, :, :2] / z
+        edge = 20
+        mask = (uv[:, :, 0] < W - edge) * (uv[:, :, 0] > edge) * \
+               (uv[:, :, 1] < H - edge) * (uv[:, :, 1] > edge)
+        mask = mask & (z[:, :, 0] < 0)
+        mask = mask.squeeze(-1)
+        percent_inside = mask.sum(dim=1) / uv.shape[1]
+
+        selected_keyframes = torch.nonzero(percent_inside).squeeze(-1)
+        rnd_inds = torch.randperm(selected_keyframes.shape[0])
+        selected_keyframes = selected_keyframes[rnd_inds[:k]]
+
+        selected_keyframes = list(selected_keyframes.cpu().numpy())
+
+        return selected_keyframes
 
     def optimize_map(self, num_joint_iters, lr_factor, idx, cur_gt_color, cur_gt_depth, gt_cur_c2w, keyframe_dict, keyframe_list, cur_c2w, wandb_q):
         """
@@ -347,16 +407,14 @@ class Mapper(object):
                 num = self.mapping_window_size-2
                 optimize_frame = random_select(len(self.keyframe_dict)-1, num)
             elif self.keyframe_selection_method == 'overlap':
-                num = self.mapping_window_size-3
-                optimize_frame = self.keyframe_selection_overlap(
-                    cur_gt_color, cur_gt_depth, cur_c2w, keyframe_dict[:-2], num)
+                num = self.mapping_window_size-1
+                # optimize_frame = self.keyframe_selection_overlap_old(cur_gt_color, cur_gt_depth, cur_c2w, keyframe_dict, num)
+                optimize_frame = self.keyframe_selection_overlap(cur_gt_color, cur_gt_depth, cur_c2w, keyframe_dict, num)
 
         # add the last keyframe and the current frame(use -1 to denote)
-        oldest_frame = None
         if len(keyframe_list) > 0:
-            optimize_frame = optimize_frame + [len(keyframe_list)-1] + [len(keyframe_list)-2]
+            # optimize_frame = optimize_frame + [len(keyframe_list)-1] + [len(keyframe_list)-2]
             optimize_frame = sorted(optimize_frame)
-            oldest_frame = min(optimize_frame)
         optimize_frame += [-1]
 
         if self.save_selected_keyframes_info:
@@ -488,8 +546,6 @@ class Mapper(object):
                         device)-det_rays_o)/det_rays_d
                     t, _ = torch.min(torch.max(t, dim=2)[0], dim=1)
                     inside_mask = t >= batch_gt_depth
-                # if inside_mask.float().mean() < (1.0 - 1e-6):
-                #     breakpoint()
                 batch_rays_d = batch_rays_d[inside_mask]
                 batch_rays_o = batch_rays_o[inside_mask]
                 batch_gt_depth = batch_gt_depth[inside_mask]
@@ -604,6 +660,7 @@ class Mapper(object):
         data_iter = iter(self.frame_loader)
 
         self.estimate_c2w_list[0] = gt_c2w
+        self.rough_key_c2ws = None
 
         init = True
         prev_idx = -1
@@ -685,6 +742,11 @@ class Mapper(object):
                         # ), 'depth': gt_depth.cpu(), 'est_c2w': cur_c2w.clone()})
                         self.keyframe_dict.append({'gt_c2w': gt_c2w, 'idx': idx, 'color': gt_color,
                         'depth': gt_depth, 'est_c2w': cur_c2w.clone()})
+
+                        if self.rough_key_c2ws is None:
+                            self.rough_key_c2ws = cur_c2w.unsqueeze(0).clone()
+                        else:
+                            self.rough_key_c2ws = torch.cat([self.rough_key_c2ws, cur_c2w.unsqueeze(0).clone()], dim=0)
 
             if self.verbose:
                 prefix = 'Auxiliary' if self.aux_mapper else ''

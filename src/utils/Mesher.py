@@ -362,13 +362,17 @@ class Mesher(object):
         nsteps_z = ((bound[2][1] - bound[2][0] + 2 * padding) / resolution).round().int().item()
         z = np.linspace(bound[2][0] - padding, bound[2][1] + padding, nsteps_z)
         
-        xx, yy, zz = np.meshgrid(x, y, z)
-        xx, yy, zz = xx.astype(np.float32), yy.astype(np.float32), zz.astype(np.float32)
-        grid_points = torch.tensor(np.vstack(
-            [xx.ravel(), yy.ravel(), zz.ravel()]).T,
-            dtype=torch.float)
+        # xx, yy, zz = np.meshgrid(x, y, z)
+        # xx, yy, zz = xx.astype(np.float32), yy.astype(np.float32), zz.astype(np.float32)
+        # grid_points = torch.tensor(np.vstack(
+        #     [xx.ravel(), yy.ravel(), zz.ravel()]).T,
+        #     dtype=torch.float)
 
-        return {"grid_points": grid_points, "xyz": [x, y, z]}
+        x_t, y_t, z_t = torch.from_numpy(x).float(), torch.from_numpy(y).float(), torch.from_numpy(z).float()
+        grid_x, grid_y, grid_z = torch.meshgrid(x_t, y_t, z_t, indexing='xy')
+        grid_points_t = torch.stack([grid_x.reshape(-1), grid_y.reshape(-1), grid_z.reshape(-1)], dim=1)
+
+        return {"grid_points": grid_points_t, "xyz": [x, y, z]}
 
     def get_mesh(self,
                  mesh_out_file,

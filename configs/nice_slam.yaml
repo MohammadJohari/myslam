@@ -1,7 +1,7 @@
 coarse: False
 sync_method: strict
 scale: 1
-verbose: True
+verbose: False
 occupancy: False
 low_gpu_mem: False
 grid_len:
@@ -51,7 +51,7 @@ mapping:
   fix_fine: True
   fix_color: False
   no_vis_on_first_frame: True
-  no_mesh_on_first_frame: False
+  no_mesh_on_first_frame: True
   no_log_on_first_frame: True
   vis_freq: 5000
   vis_inside_freq: 25 #each iteration 

@@ -11,12 +11,16 @@ grid_args="${grid_gpu} -P ams -S $(which python3) -cwd -V"
 
 for i in 0 1 2 3 4
 do
-  room="office1"
-  input_folder="/idiap/resource/database/ETHZ-Replica/${room}"
-  output="/idiap/temp/mjohari/outputs/slam/CVPR/Replica/${room}/ours_${i}"
-  python_command="run.py configs/Replica/${room}.yaml --input_folder ${input_folder} --output ${output}"
-#  python_command="run.py configs/ScanNet/scene0059.yaml"
-#  python_command="run.py configs/Apartment/apartment.yaml"
+  room="scene0472"
+
+#  input_folder="/idiap/resource/database/ETHZ-Replica/${room}"
+#  output="/idiap/temp/mjohari/outputs/slam/CVPR/Replica/${room}/ours_${i}"
+#  python_command="run.py configs/Replica/${room}.yaml --input_folder ${input_folder} --output ${output}"
+
+  input_folder="/idiap/temp/mjohari/Datasets/scannet/scans/${room}_00"
+  output="/idiap/temp/mjohari/outputs/slam/CVPR/ScanNet/${room}/ours_${i}"
+  python_command="run.py configs/ScanNet/${room}.yaml --input_folder ${input_folder} --output ${output}"
+
 
   expname="ex"$RANDOM
   log_dir="grid_logs"

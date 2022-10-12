@@ -1,7 +1,7 @@
 inherit_from: configs/Replica/replica.yaml
 mapping:
-  bound: [[-4.3,9.5],[-6.7,5.2],[-6.4,4.2]]
-  marching_cubes_bound: [[-4.3,9.5],[-6.7,5.2],[-6.4,4.2]]
+  bound: [[-3.3,8.5],[-5.7,4.2],[-5.4,3.2]]
+  marching_cubes_bound: [[-3.3,8.5],[-5.7,4.2],[-5.4,3.2]]
 data:
-  input_folder: /idiap/resource/database/ETHZ-Replica/room0
+  input_folder: /idiap/resource/database/ETHZ-Replica/room2
   output: output/Replica/room2

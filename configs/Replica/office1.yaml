@@ -1,7 +1,7 @@
 inherit_from: configs/Replica/replica.yaml
 mapping:
-  bound: [[-5.3,6.5],[-5.1,6.0],[-4.5,5.2]]
-  marching_cubes_bound: [[-5.3,6.5],[-5.1,6.0],[-4.5,5.2]]
+  bound: [[-4.3,5.5],[-4.1,5.0],[-3.5,4.2]]
+  marching_cubes_bound: [[-4.3,5.5],[-4.1,5.0],[-3.5,4.2]]
 data:
   input_folder: /idiap/resource/database/ETHZ-Replica/office1
   output: /idiap/temp/mjohari/outputs/slam/Replica/o1_sep_mid24f08_enmid_noba_pert_farneg_0804_p1500

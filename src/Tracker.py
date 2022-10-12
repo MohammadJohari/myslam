@@ -174,8 +174,7 @@ class Tracker(object):
         loss = self.sdf_loss(sdf[good_mask], z_vals[good_mask], batch_gt_depth[good_mask])
 
         if self.use_color_in_tracking:
-            color_loss = torch.square(
-                batch_gt_color - color)[good_mask].mean()
+            color_loss = torch.square(batch_gt_color - color)[good_mask].mean()
             loss += self.w_color_loss * color_loss
 
         ### Depth loss
@@ -304,16 +303,16 @@ class Tracker(object):
                     # loss_camera_tensor = torch.abs(gt_pose6d.to(device)-pose6d).mean().item()
                     # if self.verbose:
                     #     if cam_iter == self.num_cam_iters-1:
-                            # print(
-                            #     f'Re-rendering loss: {initial_loss:.2f}->{loss:.2f} ' +
-                            #     f'camera tensor error: {initial_loss_camera_tensor:.4f}->{loss_camera_tensor:.4f}')
-
-                            # wandb_q.put(({"Tracking Loss (Before)": initial_loss, "Tracking Loss (After)": loss}, idx))
-                            # wandb_q.put(({
-                            #                  "Tracking Error (Before)": initial_loss_camera_tensor,
-                            #                  "Tracking Error (After)": loss_camera_tensor,
-                            #                  "Tracking Error (Diff)": initial_loss_camera_tensor - loss_camera_tensor
-                            #              }, idx))
+                    #         print(
+                    #             f'Re-rendering loss: {initial_loss:.2f}->{loss:.2f} ' +
+                    #             f'camera tensor error: {initial_loss_camera_tensor:.4f}->{loss_camera_tensor:.4f}')
+                    #
+                    #         wandb_q.put(({"Tracking Loss (Before)": initial_loss, "Tracking Loss (After)": loss}, idx))
+                    #         wandb_q.put(({
+                    #                          "Tracking Error (Before)": initial_loss_camera_tensor,
+                    #                          "Tracking Error (After)": loss_camera_tensor,
+                    #                          "Tracking Error (Diff)": initial_loss_camera_tensor - loss_camera_tensor
+                    #                      }, idx))
 
                     # candidate_cam_pose6d = pose6d.detach()
                     if loss < current_min_loss:
