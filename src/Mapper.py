@@ -102,7 +102,7 @@ class Mapper(object):
         self.frame_reader = get_dataset(
             cfg, args, self.scale, device=self.device)
         self.n_img = len(self.frame_reader)
-        self.frame_loader = DataLoader(self.frame_reader, batch_size=1, num_workers=1, pin_memory=False, prefetch_factor=2, sampler=SeqSampler(self.n_img, self.every_frame))
+        self.frame_loader = DataLoader(self.frame_reader, batch_size=1, num_workers=1, pin_memory=True, prefetch_factor=2, sampler=SeqSampler(self.n_img, self.every_frame))
 
         ################################################
         # ray_dataset = get_ray_dataset(cfg, args, self.scale, device=self.device)
@@ -347,8 +347,9 @@ class Mapper(object):
         #     c2ws.append(keyframe['est_c2w'])
         # c2ws = torch.stack(c2ws, dim=0)
 
-        c2ws = self.rough_key_c2ws.clone()
-        w2cs = torch.inverse(c2ws)
+        # c2ws = torch.cat(self.rough_key_c2ws, dim=0)
+
+        w2cs = torch.inverse(self.rough_key_c2ws)
         ones = torch.ones_like(pts[..., 0], device=device).reshape(1, -1, 1)
         homo_pts = torch.cat([pts, ones], dim=-1).reshape(1, -1, 4, 1).expand(w2cs.shape[0], -1, -1, -1)
         w2cs_exp = w2cs.unsqueeze(1).expand(-1, homo_pts.shape[1], -1, -1)
@@ -661,6 +662,7 @@ class Mapper(object):
 
         self.estimate_c2w_list[0] = gt_c2w
         self.rough_key_c2ws = None
+        # self.rough_key_c2ws = []
 
         init = True
         prev_idx = -1
@@ -694,7 +696,8 @@ class Mapper(object):
 
             # _, gt_color, gt_depth, gt_c2w = self.frame_reader[idx]
             _, gt_color, gt_depth, gt_c2w = next(data_iter)
-            gt_color, gt_depth, gt_c2w = gt_color.squeeze(0), gt_depth.squeeze(0), gt_c2w.squeeze(0)
+            # gt_color, gt_depth, gt_c2w = gt_color.squeeze(0), gt_depth.squeeze(0), gt_c2w.squeeze(0)
+            gt_color, gt_depth, gt_c2w = gt_color.squeeze(0).to(self.device, non_blocking=True), gt_depth.squeeze(0).to(self.device, non_blocking=True), gt_c2w.squeeze(0).to(self.device, non_blocking=True)
             if not init:
                 lr_factor = cfg['mapping']['lr_factor']
                 num_joint_iters = cfg['mapping']['iters']
@@ -741,8 +744,9 @@ class Mapper(object):
                         # self.keyframe_dict.append({'gt_c2w': gt_c2w.cpu(), 'idx': idx, 'color': gt_color.cpu(
                         # ), 'depth': gt_depth.cpu(), 'est_c2w': cur_c2w.clone()})
                         self.keyframe_dict.append({'gt_c2w': gt_c2w, 'idx': idx, 'color': gt_color,
-                        'depth': gt_depth, 'est_c2w': cur_c2w.clone()})
+                                                   'depth': gt_depth, 'est_c2w': cur_c2w.clone()})
 
+                        # self.rough_key_c2ws.append(cur_c2w.unsqueeze(0).clone())
                         if self.rough_key_c2ws is None:
                             self.rough_key_c2ws = cur_c2w.unsqueeze(0).clone()
                         else:

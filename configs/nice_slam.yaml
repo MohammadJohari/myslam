@@ -61,7 +61,7 @@ mapping:
   mapping_window_size: 5
   w_color_loss: 10
   frustum_feature_selection: False
-  keyframe_selection_method: 'global'
+  keyframe_selection_method: 'overlap'
   save_selected_keyframes_info: False
   lr_first_factor: 5
   lr_factor: 1

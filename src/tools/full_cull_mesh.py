@@ -29,7 +29,8 @@ def cull_mesh(mesh_file, cfg, args, device, estimate_c2w_list=None):
 
     whole_mask = np.ones(pc.shape[0]).astype(np.bool)
     for i in tqdm(range(0, n_imgs, 1)):
-        idx, color, depth, c2w = frame_reader[i]
+        _, _, depth, c2w = frame_reader[i]
+        depth, c2w = depth.to(device), c2w.to(device)
 
         if not estimate_c2w_list is None:
             c2w = estimate_c2w_list[i].to(device)

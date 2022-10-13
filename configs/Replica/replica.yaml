@@ -19,7 +19,7 @@ mapping:
   mesh_freq: 4000000000
   ckpt_freq: 5000
   keyframe_every: 4
-  mapping_window_size: 10
+  mapping_window_size: 20
   pixels: 4000
   iters_first: 1000
   iters: 15

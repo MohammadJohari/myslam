@@ -159,8 +159,9 @@ class BaseDataset(Dataset):
             depth_data = depth_data[edge:-edge, edge:-edge]
         pose = self.poses[index]
         pose[:3, 3] *= self.scale
-        return index, color_data.to(self.device, non_blocking=True), depth_data.to(self.device, non_blocking=True), pose.to(self.device, non_blocking=True)
 
+        # return index, color_data.to(self.device, non_blocking=True), depth_data.to(self.device, non_blocking=True), pose.to(self.device, non_blocking=True)
+        return index, color_data, depth_data, pose
 
 class Replica(BaseDataset):
     def __init__(self, cfg, args, scale, device='cuda:0'

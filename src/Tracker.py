@@ -70,7 +70,7 @@ class Tracker(object):
             cfg, args, self.scale, device=self.device)
         self.n_img = len(self.frame_reader)
         self.frame_loader = DataLoader(
-            self.frame_reader, batch_size=1, shuffle=False, num_workers=1)
+            self.frame_reader, batch_size=1, shuffle=False, num_workers=1, pin_memory=True, prefetch_factor=2)
         self.visualizer = Visualizer(freq=cfg['tracking']['vis_freq'], inside_freq=cfg['tracking']['vis_inside_freq'],
                                      vis_dir=os.path.join(self.output, 'vis' if 'Demo' in self.output else 'tracking_vis'),
                                      renderer=self.renderer, truncation=self.truncation, verbose=self.verbose, device=self.device)
@@ -225,6 +225,7 @@ class Tracker(object):
         # wandb.init(config=self.cfg, project='slam', name=wandb_name, dir=wandb_dir)
 
         for idx, gt_color, gt_depth, gt_c2w in pbar:
+            gt_color, gt_depth, gt_c2w = gt_color.to(device, non_blocking=True), gt_depth.to(device, non_blocking=True), gt_c2w.to(device, non_blocking=True)
             if not self.verbose:
                 pbar.set_description(f"Tracking Frame {idx[0]}")
             idx = idx[0]
