@@ -59,15 +59,17 @@ if __name__ == '__main__':
     gt_c2w_list = gt_c2w_list.cpu().numpy()
 
 
-    ## Setting view point
-    # meshfile = f'{output}/mesh/final_mesh_eval_rec_culled.ply'
-    meshfile = f'/idiap/temp/mjohari/Datasets/scannet/scans/scene0000_00/scene0000_00_vh_clean.ply'
-    if os.path.isfile(meshfile):
-        mesh = trimesh.load(meshfile, process=False)
-        mesh.invert()
-        to_origin, _ = trimesh.bounds.oriented_bounds(mesh, ordered=False)
-        init_pose = np.eye(4)
-        init_pose = np.linalg.inv(to_origin) @ init_pose
+    # ## Setting view point
+    # # meshfile = f'{output}/mesh/final_mesh_eval_rec_culled.ply'
+    # meshfile = f'/idiap/temp/mjohari/Datasets/scannet/scans/scene0000_00/scene0000_00_vh_clean.ply'
+    # if os.path.isfile(meshfile):
+    #     mesh = trimesh.load(meshfile, process=False)
+    #     mesh.invert()
+    #     to_origin, _ = trimesh.bounds.oriented_bounds(mesh, ordered=False)
+    #     init_pose = np.eye(4)
+    #     init_pose = np.linalg.inv(to_origin) @ init_pose
+    init_pose = estimate_c2w_list[800]
+
 
     frontend = SLAMFrontend(output, init_pose=init_pose, cam_scale=0.1,
                             save_rendering=args.save_rendering, near=0,
@@ -75,7 +77,8 @@ if __name__ == '__main__':
     frontend.start()
 
     ## Simple Image
-    meshfile = f'{output}/mesh/final_mesh_eval_rec_culled.ply'
+    meshfile = f'{output}/mesh/final_mesh_eval_rec.ply'
+    # meshfile = f'cull_replica_mesh/room0.ply'
     frontend.update_mesh(meshfile)
 
     ##### Video

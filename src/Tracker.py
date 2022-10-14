@@ -121,6 +121,66 @@ class Tracker(object):
         # return 10 * fs_loss + 200 * center_loss + 1 * tail_loss
         return 10 * fs_loss + 200 * center_loss + 10 * tail_loss
 
+    def test_c2w(self, pose6d, pre_c2w, gt_color, gt_depth, batch_size):
+        with torch.no_grad():
+            all_planes = (self.planes_xy, self.planes_xz, self.planes_yz, self.c_planes_xy, self.c_planes_xz, self.c_planes_yz)
+            device = self.device
+            H, W, fx, fy, cx, cy = self.H, self.W, self.fx, self.fy, self.cx, self.cy
+
+            c2w = pose6d_to_matrix(pose6d)
+            c2ws = torch.cat([c2w, pre_c2w], dim=0)
+            Wedge = self.ignore_edge_W
+            Hedge = self.ignore_edge_H
+            batch_rays_o, batch_rays_d, batch_gt_depth, batch_gt_color = get_samples(
+                Hedge, H-Hedge, Wedge, W-Wedge, batch_size, H, W, fx, fy, cx, cy, c2ws, gt_depth.expand(2, -1, -1), gt_color.expand(2, -1, -1, -1), self.device)
+
+            if self.nice:
+                # should pre-filter those out of bounding box depth value
+                with torch.no_grad():
+                    det_rays_o = batch_rays_o.clone().detach().unsqueeze(-1)  # (N, 3, 1)
+                    det_rays_d = batch_rays_d.clone().detach().unsqueeze(-1)  # (N, 3, 1)
+                    t = (self.bound.unsqueeze(0).to(
+                        device) - det_rays_o) / det_rays_d
+                    t, _ = torch.min(torch.max(t, dim=2)[0], dim=1)
+                    inside_mask = t >= batch_gt_depth
+                batch_rays_d = batch_rays_d[inside_mask]
+                batch_rays_o = batch_rays_o[inside_mask]
+                batch_gt_depth = batch_gt_depth[inside_mask]
+                batch_gt_color = batch_gt_color[inside_mask]
+
+            ret = self.renderer.no_render_batch_ray(all_planes,
+                                                    self.decoders, batch_rays_d,
+                                                    batch_rays_o, self.device, 'color', self.truncation,
+                                                    gt_depth=batch_gt_depth)
+            depth, color, sdf, z_vals = ret
+
+            depth_mask = (batch_gt_depth > 0)
+            depth_diff = (batch_gt_depth - depth).abs()
+            diff_median = depth_diff[depth_mask].median()
+            good_mask = (depth_diff < 10 * diff_median) & depth_mask
+
+            sdf_est, sdf_pre = sdf[:batch_size], sdf[batch_size:]
+            z_vals_est, z_vals_pre = z_vals[:batch_size], z_vals[batch_size:]
+            batch_gt_depth_est, batch_gt_depth_pre = batch_gt_depth[:batch_size], batch_gt_depth[batch_size:]
+            batch_gt_color_est, batch_gt_color_pre = batch_gt_color[:batch_size], batch_gt_color[batch_size:]
+            depth_est, depth_pre = depth[:batch_size], depth[batch_size:]
+            color_est, color_pre = color[:batch_size], color[batch_size:]
+            good_mask_est, good_mask_pre = good_mask[:batch_size], good_mask[batch_size:]
+
+            loss_est = self.sdf_loss(sdf_est[good_mask_est], z_vals_est[good_mask_est], batch_gt_depth_est[good_mask_est])
+            loss_pre = self.sdf_loss(sdf_pre[good_mask_pre], z_vals_pre[good_mask_pre], batch_gt_depth_pre[good_mask_pre])
+
+            if self.use_color_in_tracking:
+                color_loss_est = torch.square(batch_gt_color_est - color_est)[good_mask_est].mean()
+                color_loss_pre = torch.square(batch_gt_color_pre - color_pre)[good_mask_pre].mean()
+                loss_est += self.w_color_loss * color_loss_est
+                loss_pre += self.w_color_loss * color_loss_pre
+
+            loss_est = loss_est + 0.1 * torch.square(batch_gt_depth_est[good_mask_est] - depth_est[good_mask_est]).mean()
+            loss_pre = loss_pre + 0.1 * torch.square(batch_gt_depth_pre[good_mask_pre] - depth_pre[good_mask_pre]).mean()
+
+            return loss_pre - loss_est
+
     def optimize_cam_in_batch(self, pose6d, gt_color, gt_depth, batch_size, optimizer):
         """
         Do one iteration of camera iteration. Sample pixels, render depth/color, calculate loss and backpropagation.
@@ -262,12 +322,17 @@ class Tracker(object):
                         idx, 0, gt_depth, gt_color, c2w.squeeze(), all_planes, self.decoders, wandb_q)
 
             else:
-                # gt_pose6d = matrix_to_pose6d(gt_c2w)
+                gt_pose6d = matrix_to_pose6d(gt_c2w)
 
                 if self.const_speed_assumption and idx-2 >= 0:
                     pre_poses = torch.stack([self.estimate_c2w_list[idx - 2], pre_c2w.squeeze(0)], dim=0)
                     pre_poses = matrix_to_pose6d(pre_poses)
                     pose6d = 2 * pre_poses[1:] - pre_poses[0:1]
+
+                    # test_loss = self.test_c2w(pose6d, pre_c2w, gt_color, gt_depth, self.tracking_pixels)
+                    # wandb_q.put(({"Better Pre": test_loss.item()}, idx))
+                    # if test_loss < 0:
+                    #     pose6d = pre_poses[1:]
                 else:
                     pose6d = matrix_to_pose6d(pre_c2w)
 
@@ -287,7 +352,7 @@ class Tracker(object):
                     optimizer_camera = torch.optim.Adam(cam_para_list, lr=self.cam_lr, betas=(0.5, 0.999))
 
 
-                # initial_loss_camera_tensor = torch.abs(gt_pose6d.to(device)-pose6d).mean().item()
+                initial_loss_camera_tensor = torch.abs(gt_pose6d.to(device)-pose6d).mean().item()
                 candidate_cam_pose6d = None
                 current_min_loss = 10000000000.
                 for cam_iter in range(self.num_cam_iters):
@@ -301,19 +366,19 @@ class Tracker(object):
                     if cam_iter == 0:
                         initial_loss = loss
 
-                    # loss_camera_tensor = torch.abs(gt_pose6d.to(device)-pose6d).mean().item()
-                    # if self.verbose:
-                    #     if cam_iter == self.num_cam_iters-1:
-                    #         print(
-                    #             f'Re-rendering loss: {initial_loss:.2f}->{loss:.2f} ' +
-                    #             f'camera tensor error: {initial_loss_camera_tensor:.4f}->{loss_camera_tensor:.4f}')
-                    #
-                    #         wandb_q.put(({"Tracking Loss (Before)": initial_loss, "Tracking Loss (After)": loss}, idx))
-                    #         wandb_q.put(({
-                    #                          "Tracking Error (Before)": initial_loss_camera_tensor,
-                    #                          "Tracking Error (After)": loss_camera_tensor,
-                    #                          "Tracking Error (Diff)": initial_loss_camera_tensor - loss_camera_tensor
-                    #                      }, idx))
+                    loss_camera_tensor = torch.abs(gt_pose6d.to(device)-pose6d).mean().item()
+                    if self.verbose:
+                        if cam_iter == self.num_cam_iters-1:
+                            print(
+                                f'Re-rendering loss: {initial_loss:.2f}->{loss:.2f} ' +
+                                f'camera tensor error: {initial_loss_camera_tensor:.4f}->{loss_camera_tensor:.4f}')
+
+                            wandb_q.put(({"Tracking Loss (Before)": initial_loss, "Tracking Loss (After)": loss}, idx))
+                            wandb_q.put(({
+                                             "Tracking Error (Before)": initial_loss_camera_tensor,
+                                             "Tracking Error (After)": loss_camera_tensor,
+                                             "Tracking Error (Diff)": initial_loss_camera_tensor - loss_camera_tensor
+                                         }, idx))
 
                     # candidate_cam_pose6d = pose6d.detach()
                     if loss < current_min_loss:

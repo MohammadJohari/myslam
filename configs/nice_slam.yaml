@@ -1,7 +1,7 @@
 coarse: False
 sync_method: strict
 scale: 1
-verbose: False
+verbose: True
 occupancy: False
 low_gpu_mem: False
 grid_len:
@@ -48,6 +48,7 @@ mapping:
   every_frame: 5
   BA: True
   BA_cam_lr: 0.001
+#  BA_cam_lr: 0.0002
   fix_fine: True
   fix_color: False
   no_vis_on_first_frame: True

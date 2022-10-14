@@ -9,17 +9,18 @@ export CUDA_VISIBLE_DEVICES=0
 grid_gpu="-l sgpu -l h=vgn[ji]*"
 grid_args="${grid_gpu} -P ams -S $(which python3) -cwd -V"
 
-for i in 0 1 2 3 4
+#for i in 0 1 2 3 4
+for i in 0 1
 do
-  room="room0"
+  room="scene0207"
 
-  input_folder="/idiap/resource/database/ETHZ-Replica/${room}"
-  output="/idiap/temp/mjohari/outputs/slam/CVPR_Over20/Replica/${room}/ours_${i}"
-  python_command="run.py configs/Replica/${room}.yaml --input_folder ${input_folder} --output ${output}"
+#  input_folder="/idiap/resource/database/ETHZ-Replica/${room}"
+#  output="/idiap/temp/mjohari/outputs/slam/CVPR/Replica/${room}/ours_${i}"
+#  python_command="run.py configs/Replica/${room}.yaml --input_folder ${input_folder} --output ${output}"
 
-#  input_folder="/idiap/temp/mjohari/Datasets/scannet/scans/${room}_00"
-#  output="/idiap/temp/mjohari/outputs/slam/CVPR/ScanNet/${room}/ours_${i}"
-#  python_command="run.py configs/ScanNet/${room}.yaml --input_folder ${input_folder} --output ${output}"
+  input_folder="/idiap/temp/mjohari/Datasets/scannet/scans/${room}_00"
+  output="/idiap/temp/mjohari/outputs/slam/CVPR_6d/ScanNet/${room}/ours_${i}"
+  python_command="run.py configs/ScanNet/${room}.yaml --input_folder ${input_folder} --output ${output}"
 
 
   expname="ex"$RANDOM

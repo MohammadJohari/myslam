@@ -167,7 +167,8 @@ def draw_trajectory(queue, output, init_pose, cam_scale,
     # set the viewer's pose in the back of the first frame's pose
     param = ctr.convert_to_pinhole_camera_parameters()
     ## Zooming level
-    init_pose[:3, 3] += 6 * normalize(init_pose[:3, 2])
+    init_pose[:3, 3] += 2 * normalize(init_pose[:3, 2])
+    # init_pose[:3, 3] += 6 * normalize(init_pose[:3, 2])
     init_pose[:3, 2] *= -1
     init_pose[:3, 1] *= -1
     init_pose = np.linalg.inv(init_pose)
