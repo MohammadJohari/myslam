@@ -7,7 +7,7 @@ tracking:
   vis_inside_freq: 25
   ignore_edge_W: 75
   ignore_edge_H: 75
-  seperate_LR: False
+  seperate_LR: True
   const_speed_assumption: True
   lr: 0.0005
 #  lr: 0.002
@@ -15,7 +15,7 @@ tracking:
   iters: 30
 mapping:
   every_frame: 4
-  vis_freq: 40000000
+  vis_freq: 4000000
   vis_inside_freq: 30
   mesh_freq: 4000000
   ckpt_freq: 500
@@ -33,3 +33,9 @@ cam:
   cy: 242.683609
   png_depth_scale: 1000. #for depth image in png format
   crop_edge: 10
+rendering:
+  N_samples: 32
+  N_surface: 8
+  N_importance: 8
+  lindisp: False
+  perturb: 1.0

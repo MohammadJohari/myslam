@@ -32,7 +32,7 @@ tracking:
   handle_dynamic: True
   vis_freq: 5000
   vis_inside_freq: 25
-  w_color_loss: 10
+  w_color_loss: 5
   seperate_LR: False
   const_speed_assumption: True
   no_vis_on_first_frame: True
@@ -47,8 +47,8 @@ mapping:
   fine_iter_ratio: -0.6
   every_frame: 5
   BA: True
+#  BA_cam_lr: 0.001
   BA_cam_lr: 0.001
-#  BA_cam_lr: 0.0002
   fix_fine: True
   fix_color: False
   no_vis_on_first_frame: True
@@ -60,7 +60,7 @@ mapping:
   ckpt_freq: 500
   keyframe_every: 50
   mapping_window_size: 5
-  w_color_loss: 10
+  w_color_loss: 5
   frustum_feature_selection: False
   keyframe_selection_method: 'overlap'
   save_selected_keyframes_info: False

@@ -866,7 +866,8 @@ class MyNICE(nn.Module):
             xz = F.grid_sample(planes_xz[i], vgrid[..., [0, 2]], padding_mode='border', align_corners=True, mode='bilinear').squeeze().transpose(0, 1)
             yz = F.grid_sample(planes_yz[i], vgrid[..., [1, 2]], padding_mode='border', align_corners=True, mode='bilinear').squeeze().transpose(0, 1)
             if act:
-                feat.append(F.relu(xy + xz + yz, inplace=True))
+                # feat.append(F.relu(xy + xz + yz, inplace=True))
+                feat.append(xy + xz + yz)
             else:
                 feat.append(xy + xz + yz)
         feat = torch.cat(feat, dim=-1)
@@ -874,6 +875,17 @@ class MyNICE(nn.Module):
         return feat
 
     def get_raw_sdf(self, p_nor, planes_xy, planes_xz, planes_yz):
+        feat = self.sample_plane_feature(p_nor, planes_xy, planes_xz, planes_yz, act=True)
+        h = feat
+        for i, l in enumerate(self.linears):
+            h = self.linears[i](h)
+            h = F.relu(h, inplace=True)
+        sdf = torch.tanh(self.output_linear(h)).squeeze()
+
+        return sdf
+
+    def get_raw_sdf2(self, p_nor, all_planes):
+        planes_xy, planes_xz, planes_yz, c_planes_xy, c_planes_xz, c_planes_yz = all_planes
         feat = self.sample_plane_feature(p_nor, planes_xy, planes_xz, planes_yz, act=True)
         h = feat
         for i, l in enumerate(self.linears):
@@ -893,14 +905,30 @@ class MyNICE(nn.Module):
 
         return rgb
 
+    def get_raw_rgb2(self, p_nor, all_planes):
+        planes_xy, planes_xz, planes_yz, c_planes_xy, c_planes_xz, c_planes_yz = all_planes
+        c_feat = self.sample_plane_feature(p_nor, c_planes_xy, c_planes_xz, c_planes_yz, act=True)
+        h = c_feat
+        for i, l in enumerate(self.c_linears):
+            h = self.c_linears[i](h)
+            h = F.relu(h, inplace=True)
+        rgb = torch.sigmoid(self.c_output_linear(h))
+
+        return rgb
+
     def get_only_raw(self, p, all_planes):
         planes_xy, planes_xz, planes_yz, c_planes_xy, c_planes_xz, c_planes_yz = all_planes
+        p_shape = p.shape
+
         p_nor = normalize_3d_coordinate(p.clone(), self.bound)
 
         sdf = self.get_raw_sdf(p_nor, planes_xy, planes_xz, planes_yz)
         rgb = self.get_raw_rgb(p_nor, c_planes_xy, c_planes_xz, c_planes_yz)
 
-        return torch.cat([rgb, sdf.unsqueeze(-1)], dim=-1)
+        raw = torch.cat([rgb, sdf.unsqueeze(-1)], dim=-1)
+        raw = raw.reshape(*p_shape[:-1], -1)
+
+        return raw
 
     def forward(self, p, z_vals, all_planes):
         planes_xy, planes_xz, planes_yz, c_planes_xy, c_planes_xz, c_planes_yz = all_planes

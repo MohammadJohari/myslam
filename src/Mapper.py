@@ -368,6 +368,8 @@ class Mapper(object):
         mask = mask.squeeze(-1)
         percent_inside = mask.sum(dim=1) / uv.shape[1]
 
+        # selected_keyframes = torch.argsort(percent_inside, descending=True)[:k]
+
         selected_keyframes = torch.nonzero(percent_inside).squeeze(-1)
         rnd_inds = torch.randperm(selected_keyframes.shape[0])
         selected_keyframes = selected_keyframes[rnd_inds[:k]]
@@ -405,16 +407,16 @@ class Mapper(object):
             optimize_frame = []
         else:
             if self.keyframe_selection_method == 'global':
-                num = self.mapping_window_size-2
-                optimize_frame = random_select(len(self.keyframe_dict)-1, num)
+                num = self.mapping_window_size-3
+                optimize_frame = random_select(len(self.keyframe_dict)-2, num)
             elif self.keyframe_selection_method == 'overlap':
                 num = self.mapping_window_size-1
                 # optimize_frame = self.keyframe_selection_overlap_old(cur_gt_color, cur_gt_depth, cur_c2w, keyframe_dict, num)
                 optimize_frame = self.keyframe_selection_overlap(cur_gt_color, cur_gt_depth, cur_c2w, keyframe_dict, num)
 
         # add the last keyframe and the current frame(use -1 to denote)
-        if len(keyframe_list) > 0:
-            # optimize_frame = optimize_frame + [len(keyframe_list)-1] + [len(keyframe_list)-2]
+        if len(keyframe_list) > 1:
+            optimize_frame = optimize_frame + [len(keyframe_list)-1] + [len(keyframe_list)-2]
             optimize_frame = sorted(optimize_frame)
         optimize_frame += [-1]
 
@@ -479,12 +481,12 @@ class Mapper(object):
             # gt_pose6ds = matrix_to_pose6d(gt_c2ws)
 
             # The corresponding lr will be set according to which stage the optimization is in
-            optimizer = Adam([{'params': decoders_para_list, 'lr': 0},
+            optimizer = torch.optim.Adam([{'params': decoders_para_list, 'lr': 0},
                               {'params': planes_para, 'lr': 0},
                               {'params': c_planes_para, 'lr': 0},
-                              {'params': [pose6ds], 'lr': 0, 'betas':(0.5, 0.999)}])
+                              {'params': [pose6ds], 'lr': 0, 'betas':(0.9, 0.999)}])
         else:
-            optimizer = Adam([{'params': decoders_para_list, 'lr': 0},
+            optimizer = torch.optim.Adam([{'params': decoders_para_list, 'lr': 0},
                               {'params': planes_para, 'lr': 0},
                               {'params': c_planes_para, 'lr': 0}])
 
@@ -508,31 +510,8 @@ class Mapper(object):
             # with torch.autocast(device_type='cuda', dtype=torch.bfloat16):
             if self.BA:
                 c2ws_ = torch.cat([c2ws[0:1], pose6d_to_matrix(pose6ds)], dim=0)
-                # c2ws = pose6d_to_matrix(pose6ds)
-                # c2ws[:-1] = c2ws[:-1].detach()
             else:
                 c2ws_ = c2ws
-
-            # c2ws = []
-            # camera_tensor_id = 0
-            # for frame in optimize_frame:
-            #     if frame != -1:
-            #         if self.BA and frame != oldest_frame:
-            #             pose6d = pose6ds[camera_tensor_id]
-            #             camera_tensor_id += 1
-            #             c2w = get_camera_from_tensor(camera_tensor)
-            #         else:
-            #             c2w = keyframe_dict[frame]['est_c2w']
-            #
-            #     else:
-            #         if self.BA:
-            #             camera_tensor = camera_tensor_list[camera_tensor_id]
-            #             c2w = get_camera_from_tensor(camera_tensor)
-            #         else:
-            #             c2w = cur_c2w
-            #
-            #     c2ws.append(c2w)
-            # c2ws = torch.stack(c2ws, dim=0)
 
             batch_rays_o, batch_rays_d, batch_gt_depth, batch_gt_color = get_samples(
                 0, H, 0, W, pixs_per_image, H, W, fx, fy, cx, cy, c2ws_, gt_depths, gt_colors, self.device)
@@ -567,7 +546,7 @@ class Mapper(object):
                 loss += weighted_color_loss
 
             ### Depth loss
-            loss = loss + 0.1 * torch.square(batch_gt_depth[depth_mask] - depth[depth_mask]).mean()
+            loss = loss + 5 * torch.square(batch_gt_depth[depth_mask] - depth[depth_mask]).mean()
 
             ## TV loss
             # for planes in all_planes[:3]:

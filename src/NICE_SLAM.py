@@ -228,7 +228,7 @@ class NICE_SLAM():
         planes_xy, planes_xz, planes_yz = [], [], []
         c_planes_xy, c_planes_xz, c_planes_yz = [], [], []
         planes_res = [0.24, 0.06]
-        c_planes_res = [0.24, 0.02]
+        c_planes_res = [0.24, 0.03]
 
         planes_dim = c_dim
         for grid_len in planes_res:
