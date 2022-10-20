@@ -15,9 +15,9 @@ tracking:
   iters: 30
 mapping:
   every_frame: 4
-  vis_freq: 4000000
-  vis_inside_freq: 30
-  mesh_freq: 4000000
+  vis_freq: 4000000000
+  vis_inside_freq: 29
+  mesh_freq: 40000000
   ckpt_freq: 500
   keyframe_every: 4
   mapping_window_size: 20
@@ -34,7 +34,7 @@ cam:
   png_depth_scale: 1000. #for depth image in png format
   crop_edge: 10
 rendering:
-  N_samples: 32
+  N_samples: 48
   N_surface: 8
   N_importance: 8
   lindisp: False

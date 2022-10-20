@@ -5,5 +5,5 @@ mapping:
   marching_cubes_bound: [[-1.9,7.9],[-2.2,4.5],[-2.5,2.3]]
 data:
   input_folder: /idiap/resource/database/ETHZ-Replica/room0
-#  output: /idiap/temp/mjohari/outputs/slam/Replica/r0_sanity_dl01_t06_bound_hr
+#  output: /idiap/temp/mjohari/outputs/slam/Replica/r0_sf8_dl001_tdl1_tcl5_mcl5
   output: /idiap/temp/mjohari/outputs/slam/Replica/r0_temp

@@ -31,7 +31,7 @@ class Renderer(object):
 
         return lower + (upper - lower) * t_rand
 
-    def no_render_batch_ray(self, all_planes, decoders, rays_d, rays_o, device, stage, truncation, gt_depth=None):
+    def no_render_batch_ray_old(self, all_planes, decoders, rays_d, rays_o, device, stage, truncation, gt_depth=None):
         """
         Render color, depth and uncertainty of a batch of rays.
 
@@ -142,7 +142,135 @@ class Renderer(object):
 
         return rendered_depth, rendered_rgb, raw[..., -1], z_vals
 
-    def sdf2alpha(self, sdf, sharpness=20.0):
+    def no_render_batch_ray(self, all_planes, decoders, rays_d, rays_o, device, stage, truncation, gt_depth=None):
+        """
+        Render color, depth and uncertainty of a batch of rays.
+
+        Args:
+            c (dict): feature grids.
+            decoders (nn.module): decoders.
+            rays_d (tensor, N*3): rays direction.
+            rays_o (tensor, N*3): rays origin.
+            device (str): device name to compute on.
+            stage (str): query stage.
+            gt_depth (tensor, optional): sensor depth image. Defaults to None.
+
+        Returns:
+            depth (tensor): rendered depth.
+            uncertainty (tensor): rendered uncertainty.
+            color (tensor): rendered color.
+        """
+        N_samples = self.N_samples
+        N_surface = self.N_surface
+        N_importance = self.N_importance
+        N_rays = rays_o.shape[0]
+        z_vals = torch.empty([N_rays, N_samples + N_surface], device=device)
+        near = 0.0
+        t_vals_uni = torch.linspace(0., 1., steps=N_samples, device=device)
+        t_vals_surface = torch.linspace(0., 1., steps=N_surface, device=device)
+
+        ### pixels with gt depth:
+        gt_depth = gt_depth.reshape(-1, 1)
+        gt_mask = (gt_depth > 0).squeeze()
+        gt_nonezero = gt_depth[gt_mask]
+
+        gt_depth_surface = gt_nonezero.expand(-1, N_surface)
+        z_vals_surface = gt_depth_surface - (1.5 * truncation)  + (3 * truncation * t_vals_surface)
+
+        gt_depth_free = gt_nonezero.expand(-1, N_samples)
+        z_vals_free = near + 1.2 * gt_depth_free * t_vals_uni
+
+        z_vals_nonzero, _ = torch.sort(torch.cat([z_vals_free, z_vals_surface], dim=-1), dim=-1)
+        if self.perturb > 0.:
+            z_vals_nonzero = self.perturbation(z_vals_nonzero)
+        z_vals[gt_mask] = z_vals_nonzero
+
+
+        ### pixels without gt depth:
+        if not gt_mask.all():
+            with torch.no_grad():
+                rays_o_uni = rays_o[~gt_mask].detach()
+                rays_d_uni = rays_d[~gt_mask].detach()
+                det_rays_o = rays_o_uni.unsqueeze(-1)  # (N, 3, 1)
+                det_rays_d = rays_d_uni.unsqueeze(-1)  # (N, 3, 1)
+                t = (self.bound.unsqueeze(0) - det_rays_o)/det_rays_d  # (N, 3, 2)
+                far_bb, _ = torch.min(torch.max(t, dim=2)[0], dim=1)
+                far_bb = far_bb.unsqueeze(-1)
+                far_bb += 0.01
+
+                z_vals_uni = near * (1. - t_vals_uni) + far_bb * t_vals_uni
+                if self.perturb > 0.:
+                    z_vals_uni = self.perturbation(z_vals_uni)
+                pts_uni = rays_o_uni.unsqueeze(1) + rays_d_uni.unsqueeze(1) * z_vals_uni.unsqueeze(-1)  # [N_rays, N_samples, 3]
+
+                pts_uni_nor = normalize_3d_coordinate(pts_uni.clone(), self.bound)
+                sdf_uni = decoders.get_raw_sdf2(pts_uni_nor, all_planes)
+                sdf_uni = sdf_uni.reshape(*pts_uni.shape[0:2])
+                # weights_uni = self.sdf2weights(sdf_uni, z_vals_uni, truncation)
+                alpha_uni = self.sdf2alpha(sdf_uni, decoders.sharpness)
+                weights_uni = alpha_uni * torch.cumprod(torch.cat([torch.ones((alpha_uni.shape[0], 1), device=device)
+                                                        , (1. - alpha_uni + 1e-10)], -1), -1)[:, :-1]
+
+                z_vals_uni_mid = .5 * (z_vals_uni[..., 1:] + z_vals_uni[..., :-1])
+                z_samples_uni = sample_pdf(z_vals_uni_mid, weights_uni[..., 1:-1], N_surface, det=False, device=device)
+                z_vals_uni, ind = torch.sort(torch.cat([z_vals_uni, z_samples_uni], -1), -1)
+                z_vals[~gt_mask] = z_vals_uni
+
+        pts = rays_o[..., None, :] + rays_d[..., None, :] * \
+              z_vals[..., :, None]  # [N_rays, N_samples+N_surface, 3]
+
+        raw = decoders.get_only_raw(pts, all_planes)
+        # weights = self.sdf2weights(raw[..., -1], z_vals, truncation)
+        alpha = self.sdf2alpha(raw[..., -1], decoders.sharpness)
+        weights = alpha * torch.cumprod(torch.cat([torch.ones((alpha.shape[0], 1), device=device)
+                                                , (1. - alpha + 1e-10)], -1), -1)[:, :-1]
+
+        rendered_rgb = torch.sum(weights[..., None] * raw[..., :3], -2)
+        rendered_depth = torch.sum(weights * z_vals, -1)
+
+        return rendered_depth, rendered_rgb, raw[..., -1], z_vals
+
+        # rendered_depth, rendered_rgb, sdf = decoders(pts, z_vals, all_planes)
+        # return rendered_depth, rendered_rgb, sdf, z_vals
+
+        # pts_nor = normalize_3d_coordinate(pts.clone(), self.bound)
+        # sdf = decoders.get_raw_sdf2(pts_nor, all_planes)
+        # sdf = sdf.reshape(*pts.shape[0:2])
+        # weights = self.sdf2weights(sdf, z_vals, truncation)
+        # # alpha = self.sdf2alpha(raw[..., -1])
+        # # weights = alpha * torch.cumprod(torch.cat([torch.ones((alpha.shape[0], 1), device=device)
+        # #                                         , (1. - alpha + 1e-10)], -1), -1)[:, :-1]
+        #
+        # rgb = torch.zeros([pts_nor.shape[0], 3], device=device)
+        # nonzero_mask = weights.reshape(-1) > 0.0
+        # rgb_nonzero = decoders.get_raw_rgb2(pts_nor[nonzero_mask], all_planes)
+        # rgb[nonzero_mask] = rgb_nonzero
+        # rgb = rgb.reshape(*pts.shape[0:2], 3)
+        # raw = torch.cat([rgb, sdf.unsqueeze(-1)], dim=-1)
+        #
+        # if N_importance > 0:
+        #     z_vals_mid = .5 * (z_vals[..., 1:] + z_vals[..., :-1])
+        #     z_samples = sample_pdf(
+        #         z_vals_mid, weights[..., 1:-1].detach(), N_importance, det=False, device=device)
+        #     pts_importance = rays_o[..., None, :] + rays_d[..., None, :] * \
+        #                      z_samples[..., :, None]
+        #     raw_importance = decoders.get_only_raw(pts_importance, all_planes)
+        #
+        #     z_vals, ind = torch.sort(torch.cat([z_vals, z_samples], -1), -1)
+        #     raw = torch.cat([raw, raw_importance], 1)
+        #     raw = torch.gather(raw, dim=1, index=ind.unsqueeze(-1).expand(-1, -1, 4))
+        #
+        #     weights = self.sdf2weights(raw[..., -1], z_vals, truncation)
+        #     # alpha = self.sdf2alpha(raw[..., -1])
+        #     # weights = alpha * torch.cumprod(torch.cat([torch.ones((alpha.shape[0], 1), device=device)
+        #     #                                     , (1. - alpha + 1e-10)], -1), -1)[:, :-1]
+        #
+        # rendered_rgb = torch.sum(weights[..., None] * raw[..., :3], -2)
+        # rendered_depth = torch.sum(weights * z_vals, -1)
+        #
+        # return rendered_depth, rendered_rgb, raw[..., -1], z_vals
+
+    def sdf2alpha(self, sdf, sharpness=10):
         return 1. - torch.exp(-sharpness * torch.sigmoid(-sdf * sharpness))
         # return 1. - torch.exp(- 20 * torch.sigmoid(-sdf * 10))
     def sdf2weights(self, sdf, z_vals, truncation, sharpness=10.0):

@@ -349,7 +349,7 @@ class Mapper(object):
 
         # c2ws = torch.cat(self.rough_key_c2ws, dim=0)
 
-        w2cs = torch.inverse(self.rough_key_c2ws)
+        w2cs = torch.inverse(self.rough_key_c2ws[:-2])
         ones = torch.ones_like(pts[..., 0], device=device).reshape(1, -1, 1)
         homo_pts = torch.cat([pts, ones], dim=-1).reshape(1, -1, 4, 1).expand(w2cs.shape[0], -1, -1, -1)
         w2cs_exp = w2cs.unsqueeze(1).expand(-1, homo_pts.shape[1], -1, -1)
@@ -485,6 +485,10 @@ class Mapper(object):
                               {'params': planes_para, 'lr': 0},
                               {'params': c_planes_para, 'lr': 0},
                               {'params': [pose6ds], 'lr': 0, 'betas':(0.9, 0.999)}])
+
+            # optimizer = torch.optim.Adam([{'params': decoders_para_list, 'lr': 0},
+            #                   {'params': planes_para, 'lr': 0},
+            #                   {'params': c_planes_para, 'lr': 0}])
         else:
             optimizer = torch.optim.Adam([{'params': decoders_para_list, 'lr': 0},
                               {'params': planes_para, 'lr': 0},
@@ -495,13 +499,17 @@ class Mapper(object):
 
             optimizer.param_groups[0]['lr'] = cfg['mapping']['stage'][self.stage]['decoders_lr']*lr_factor
             optimizer.param_groups[1]['lr'] = cfg['mapping']['stage'][self.stage]['fine_lr']*lr_factor
-            optimizer.param_groups[2]['lr'] = cfg['mapping']['stage'][self.stage]['color_lr']*lr_factor
+
+            # if joint_iter >= 10:
+            optimizer.param_groups[2]['lr'] = cfg['mapping']['stage'][self.stage]['color_lr'] * lr_factor
+
             if self.BA:
                 if self.stage == 'color':
-                    # optimizer.param_groups[2]['lr'] = self.BA_cam_lr
-                    optimizer.param_groups[3]['lr'] = 0.001
-                    # if joint_iter >= 9:
-                    #     optimizer.param_groups[2]['lr'] = 0.001
+                    optimizer.param_groups[3]['lr'] = self.BA_cam_lr
+                # if joint_iter >= 5:
+                #     optimizer.param_groups[3]['lr'] = self.BA_cam_lr
+                    # optimizer.add_param_group({'params': [pose6ds], 'lr': 0.0001, 'betas': (0.9, 0.999)})
+
 
             if (not (idx == 0 and self.no_vis_on_first_frame)) and ('Demo' not in self.output) and (not self.aux_mapper):
                 self.visualizer.vis(
@@ -546,14 +554,14 @@ class Mapper(object):
                 loss += weighted_color_loss
 
             ### Depth loss
-            loss = loss + 5 * torch.square(batch_gt_depth[depth_mask] - depth[depth_mask]).mean()
+            loss = loss + 0.1 * torch.square(batch_gt_depth[depth_mask] - depth[depth_mask]).mean()
 
             ## TV loss
             # for planes in all_planes[:3]:
             #     for plane in planes:
             #         tv1 = torch.pow((plane[..., 1:] - plane[..., :-1]), 2).sum()
             #         tv2 = torch.pow((plane[..., 1:, :] - plane[..., :-1, :]), 2).sum()
-            #         loss = loss + 0.01 * (tv1 + tv2)
+            #         loss = loss + 0.0001 * (tv1 + tv2)
 
             # ## Stupid loss function
             # loss = loss + 5 * torch.mean(torch.square(sdf - torch.ones_like(sdf)))

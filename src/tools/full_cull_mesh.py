@@ -60,7 +60,7 @@ def cull_mesh(mesh_file, cfg, args, device, estimate_c2w_list=None):
         depth_samples = F.grid_sample(depth[None, None], grid, padding_mode='zeros', align_corners=True).squeeze()
 
         edge = 0
-        eps = 0.10
+        eps = 0.06
         # mask = (0 <= -z[:, 0, 0]) & (uv[:, 0] < W -edge) & (uv[:, 0] > edge) & (uv[:, 1] < H-edge) & (uv[:, 1] > edge)
         mask = (depth_samples + eps >= -z[:, 0, 0]) & (0 <= -z[:, 0, 0]) & (uv[:, 0] < W - edge) & (uv[:, 0] > edge) & (uv[:, 1] < H - edge) & (uv[:, 1] > edge)
         mask = mask.cpu().numpy()

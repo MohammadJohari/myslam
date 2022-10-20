@@ -1,7 +1,7 @@
 coarse: False
 sync_method: strict
 scale: 1
-verbose: True
+verbose: False
 occupancy: False
 low_gpu_mem: False
 grid_len:

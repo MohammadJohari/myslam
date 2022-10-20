@@ -881,6 +881,7 @@ class MyNICE(nn.Module):
             h = self.linears[i](h)
             h = F.relu(h, inplace=True)
         sdf = torch.tanh(self.output_linear(h)).squeeze()
+        # sdf = self.output_linear(h).squeeze()
 
         return sdf
 
@@ -892,6 +893,7 @@ class MyNICE(nn.Module):
             h = self.linears[i](h)
             h = F.relu(h, inplace=True)
         sdf = torch.tanh(self.output_linear(h)).squeeze()
+        # sdf = self.output_linear(h).squeeze()
 
         return sdf
 

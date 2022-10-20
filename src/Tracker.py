@@ -335,7 +335,7 @@ class Tracker(object):
                         idx, 0, gt_depth, gt_color, c2w.squeeze(), all_planes, self.decoders, wandb_q)
 
             else:
-                gt_pose6d = matrix_to_pose6d(gt_c2w)
+                # gt_pose6d = matrix_to_pose6d(gt_c2w)
 
                 if self.const_speed_assumption and idx-2 >= 0:
                     pre_poses = torch.stack([self.estimate_c2w_list[idx - 2], pre_c2w.squeeze(0)], dim=0)
@@ -366,7 +366,7 @@ class Tracker(object):
                     optimizer_camera = torch.optim.Adam(cam_para_list, lr=self.cam_lr, betas=(0.9, 0.999))
 
 
-                initial_loss_camera_tensor = torch.abs(gt_pose6d.to(device)-pose6d).mean().item()
+                # initial_loss_camera_tensor = torch.abs(gt_pose6d.to(device)-pose6d).mean().item()
                 candidate_cam_pose6d = None
                 current_min_loss = 10000000000.
                 for cam_iter in range(self.num_cam_iters):
@@ -380,20 +380,20 @@ class Tracker(object):
                     if cam_iter == 0:
                         initial_loss = loss
 
-                    loss_camera_tensor = torch.abs(gt_pose6d.to(device)-pose6d).mean().item()
-                    if self.verbose:
-                        if cam_iter == self.num_cam_iters-1:
-                            print(
-                                f'Re-rendering loss: {initial_loss:.2f}->{loss:.2f} ' +
-                                f'camera tensor error: {initial_loss_camera_tensor:.4f}->{loss_camera_tensor:.4f}')
-
-                            wandb_q.put(({"Depth Statistic": self.depth_map_err.item()}, idx))
-                            wandb_q.put(({"Tracking Loss (Before)": initial_loss, "Tracking Loss (After)": loss}, idx))
-                            wandb_q.put(({
-                                             "Tracking Error (Before)": initial_loss_camera_tensor,
-                                             "Tracking Error (After)": loss_camera_tensor,
-                                             "Tracking Error (Diff)": initial_loss_camera_tensor - loss_camera_tensor
-                                         }, idx))
+                    # loss_camera_tensor = torch.abs(gt_pose6d.to(device)-pose6d).mean().item()
+                    # if self.verbose:
+                    #     if cam_iter == self.num_cam_iters-1:
+                    #         print(
+                    #             f'Re-rendering loss: {initial_loss:.2f}->{loss:.2f} ' +
+                    #             f'camera tensor error: {initial_loss_camera_tensor:.4f}->{loss_camera_tensor:.4f}')
+                    #
+                    #         wandb_q.put(({"Depth Statistic": self.depth_map_err.item()}, idx))
+                    #         wandb_q.put(({"Tracking Loss (Before)": initial_loss, "Tracking Loss (After)": loss}, idx))
+                    #         wandb_q.put(({
+                    #                          "Tracking Error (Before)": initial_loss_camera_tensor,
+                    #                          "Tracking Error (After)": loss_camera_tensor,
+                    #                          "Tracking Error (Diff)": initial_loss_camera_tensor - loss_camera_tensor
+                    #                      }, idx))
 
                     # candidate_cam_pose6d = pose6d.detach()
                     if loss < current_min_loss:

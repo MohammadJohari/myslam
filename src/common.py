@@ -24,7 +24,7 @@ def sample_pdf(bins, weights, N_samples, det=False, device='cuda:0'):
     """
     # Get pdf
     # weights = weights + 1e-5  # prevent nans
-    # pdf = weights / torch.sum(weights, -1, keepdim=True)
+    pdf = weights / torch.sum(weights, -1, keepdim=True)
     pdf = weights
 
     cdf = torch.cumsum(pdf, -1)
@@ -33,23 +33,24 @@ def sample_pdf(bins, weights, N_samples, det=False, device='cuda:0'):
 
     # Take uniform samples
     if det:
-        u = torch.linspace(0., 1., steps=N_samples)
+        u = torch.linspace(0., 1., steps=N_samples, device=device)
         u = u.expand(list(cdf.shape[:-1]) + [N_samples])
     else:
-        u = torch.rand(list(cdf.shape[:-1]) + [N_samples])
+        u = torch.rand(list(cdf.shape[:-1]) + [N_samples], device=device)
 
-    u = u.to(device)
     # Invert CDF
-    u = u.contiguous()
-    try:
-        # this should work fine with the provided environment.yaml
-        inds = torch.searchsorted(cdf, u, right=True)
-    except:
-        # for lower version torch that does not have torch.searchsorted,
-        # you need to manually install from
-        # https://github.com/aliutkus/torchsearchsorted
-        from torchsearchsorted import searchsorted
-        inds = searchsorted(cdf, u, side='right')
+    inds = torch.searchsorted(cdf, u, right=True)
+
+    # u = u.contiguous()
+    # try:
+    #     # this should work fine with the provided environment.yaml
+    #     inds = torch.searchsorted(cdf, u, right=True)
+    # except:
+    #     # for lower version torch that does not have torch.searchsorted,
+    #     # you need to manually install from
+    #     # https://github.com/aliutkus/torchsearchsorted
+    #     from torchsearchsorted import searchsorted
+    #     inds = searchsorted(cdf, u, side='right')
     below = torch.max(torch.zeros_like(inds-1), inds-1)
     above = torch.min((cdf.shape[-1]-1) * torch.ones_like(inds), inds)
     inds_g = torch.stack([below, above], -1)  # (batch, N_samples, 2)
