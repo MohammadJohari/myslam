@@ -1,3 +1,10 @@
+# *****************************************************************
+# This source code is only provided for the reviewing purpose of
+# CVPR 2023. The source files should not be kept or used in any
+# commercial or research products. Please delete all files after
+# the reviewing period.
+# *****************************************************************
+
 import argparse
 import os
 import time
@@ -23,10 +30,6 @@ if __name__ == '__main__':
                         help='input folder, this have higher priority, can overwrite the one in config file')
     parser.add_argument('--output', type=str,
                         help='output folder, this have higher priority, can overwrite the one inconfig file')
-    nice_parser = parser.add_mutually_exclusive_group(required=False)
-    nice_parser.add_argument('--nice', dest='nice', action='store_true')
-    nice_parser.add_argument('--imap', dest='nice', action='store_false')
-    parser.set_defaults(nice=True)
     parser.add_argument('--save_rendering',
                         action='store_true', help='save rendering video to `vis.mp4` in output folder ')
     parser.add_argument('--vis_input_frame',
@@ -34,8 +37,7 @@ if __name__ == '__main__':
     parser.add_argument('--no_gt_traj',
                         action='store_true', help='not visualize gt trajectory')
     args = parser.parse_args()
-    cfg = config.load_config(
-        args.config, 'configs/nice_slam.yaml' if args.nice else 'configs/imap.yaml')
+    cfg = config.load_config(args.config, 'configs/ESLAM.yaml')
     scale = cfg['scale']
     output = cfg['data']['output'] if args.output is None else args.output
     if args.vis_input_frame:
@@ -100,13 +102,14 @@ if __name__ == '__main__':
         frontend.update_pose(1, estimate_c2w_list[i], gt=False)
         if not args.no_gt_traj:
             frontend.update_pose(1, gt_c2w_list[i], gt=True)
-        # the visualizer might get stucked if update every frame
-        # with a long sequence (10000+ frames)
         if i % 10 == 0:
             frontend.update_cam_trajectory(i, gt=False)
             if not args.no_gt_traj:
                 frontend.update_cam_trajectory(i, gt=True)
         time.sleep(0.3)
+
+    time.sleep(1)
+    frontend.terminate()
 
     if args.save_rendering:
         time.sleep(1)

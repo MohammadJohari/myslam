@@ -1,3 +1,10 @@
+# *****************************************************************
+# This source code is only provided for the reviewing purpose of
+# CVPR 2023. The source files should not be kept or used in any
+# commercial or research products. Please delete all files after
+# the reviewing period.
+# *****************************************************************
+
 import os
 from multiprocessing import Process, Queue
 from queue import Empty
@@ -34,7 +41,7 @@ def create_camera_actor(i, is_gt=False, scale=0.005):
             (1.-t_vals)[:, None] + end_points[None, :] * (t_vals)[:, None]
         points.append(point)
     points = np.concatenate(points)
-    color = (0.0, 0.0, 0.0) if is_gt else (1.0, .0, .0)
+    color = (0.0, 1.0, 0.0) if is_gt else (1.0, .0, .0)
     camera_actor = o3d.geometry.PointCloud(
         points=o3d.utility.Vector3dVector(points))
     camera_actor.paint_uniform_color(color)
@@ -91,15 +98,6 @@ def draw_trajectory(queue, output, init_pose, cam_scale,
                     if draw_trajectory.mesh is not None:
                         vis.remove_geometry(draw_trajectory.mesh)
                     draw_trajectory.mesh = o3d.io.read_triangle_mesh(meshfile)
-                    ##### Sepehr: Commenting fliping normals
-                    # draw_trajectory.mesh.compute_vertex_normals()
-                    # ### flip face orientation
-                    # new_triangles = np.asarray(
-                    #     draw_trajectory.mesh.triangles)[:, ::-1]
-                    # draw_trajectory.mesh.triangles = o3d.utility.Vector3iVector(
-                    #     new_triangles)
-                    # draw_trajectory.mesh.triangle_normals = o3d.utility.Vector3dVector(
-                    #     -np.asarray(draw_trajectory.mesh.triangle_normals))
                     vis.add_geometry(draw_trajectory.mesh)
 
                 elif data[0] == 'traj':
@@ -220,3 +218,6 @@ class SLAMFrontend:
 
     def join(self):
         self.p.join()
+
+    def terminate(self):
+        self.p.terminate()

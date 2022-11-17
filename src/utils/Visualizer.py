@@ -1,3 +1,10 @@
+# *****************************************************************
+# This source code is only provided for the reviewing purpose of
+# CVPR 2023. The source files should not be kept or used in any
+# commercial or research products. Please delete all files after
+# the reviewing period.
+# *****************************************************************
+
 import os
 import torch
 import numpy as np
@@ -41,15 +48,8 @@ class Visualizer(object):
                 gt_depth_np = gt_depth.squeeze(0).cpu().numpy()
                 gt_color_np = gt_color.squeeze(0).cpu().numpy()
 
-                # if len(c2w_or_camera_tensor.shape) == 1:
                 if c2w_or_camera_tensor.shape[-1] > 4: ## 6od
                     c2w = pose6d_to_matrix(c2w_or_camera_tensor.detach()).squeeze()
-                    # bottom = torch.from_numpy(
-                    #     np.array([0, 0, 0, 1.]).reshape([1, 4])).type(
-                    #         torch.float32).to(self.device)
-                    # c2w = get_camera_from_tensor(
-                    #     c2w_or_camera_tensor.clone().detach())
-                    # c2w = torch.cat([c2w, bottom], dim=0)
                 else:
                     c2w = c2w_or_camera_tensor.squeeze().detach()
 
@@ -59,7 +59,6 @@ class Visualizer(object):
                     c2w,
                     self.truncation,
                     self.device,
-                    stage='color',
                     gt_depth=gt_depth)
                 depth_np = depth.detach().cpu().numpy()
                 color_np = color.detach().cpu().numpy()

@@ -1,4 +1,4 @@
-name: nice-slam
+name: eslam
 channels:
   - pytorch
   - conda-forge

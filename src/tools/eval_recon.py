@@ -10,7 +10,6 @@ from scipy.spatial import cKDTree as KDTree
 def normalize(x):
     return x / np.linalg.norm(x)
 
-
 def viewmatrix(z, up, pos):
     vec2 = normalize(z)
     vec1_avg = up
@@ -18,7 +17,6 @@ def viewmatrix(z, up, pos):
     vec1 = normalize(np.cross(vec2, vec0))
     m = np.stack([vec0, vec1, vec2, pos], 1)
     return m
-
 
 def completion_ratio(gt_points, rec_points, dist_th=0.05):
     gen_points_kd_tree = KDTree(rec_points)

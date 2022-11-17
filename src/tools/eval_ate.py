@@ -1,3 +1,10 @@
+# *****************************************************************
+# This source code is only provided for the reviewing purpose of
+# CVPR 2023. The source files should not be kept or used in any
+# commercial or research products. Please delete all files after
+# the reviewing period.
+# *****************************************************************
+
 import argparse
 import os
 import numpy
@@ -162,7 +169,6 @@ def evaluate_ate(first_list, second_list, plot="", _args=""):
                                    for value in second_list[b][0:3]] for b in second_stamps]).transpose()
     second_xyz_full_aligned = rot * second_xyz_full + trans
 
-    args.verbose = True
     if args.verbose:
         print("compared_pose_pairs %d pairs" % (len(trans_error)))
 
@@ -268,14 +274,9 @@ if __name__ == '__main__':
     parser.add_argument('config', type=str, help='Path to config file.')
     parser.add_argument('--output', type=str,
                         help='output folder, this have higher priority, can overwrite the one inconfig file')
-    nice_parser = parser.add_mutually_exclusive_group(required=False)
-    nice_parser.add_argument('--nice', dest='nice', action='store_true')
-    nice_parser.add_argument('--imap', dest='nice', action='store_false')
-    parser.set_defaults(nice=True)
 
     args = parser.parse_args()
-    cfg = config.load_config(
-        args.config, 'configs/nice_slam.yaml' if args.nice else 'configs/imap.yaml')
+    cfg = config.load_config(args.config, 'configs/ESLAM.yaml')
     scale = cfg['scale']
     output = cfg['data']['output'] if args.output is None else args.output
     cofusion = ('cofusion' in args.config) or ('CoFusion' in args.config)

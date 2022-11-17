@@ -1,11 +1,12 @@
+# *****************************************************************
+# This source code is only provided for the reviewing purpose of
+# CVPR 2023. The source files should not be kept or used in any
+# commercial or research products. Please delete all files after
+# the reviewing period.
+# *****************************************************************
+
 import yaml
-from src import conv_onet
-
-
-method_dict = {
-    'conv_onet': conv_onet
-}
-
+from src import networks
 
 def load_config(path, default_path=None):
     """
@@ -60,20 +61,17 @@ def update_recursive(dict1, dict2):
 
 
 # Models
-def get_model(cfg, nice=True):
+def get_model(cfg):
     """
     Returns the model instance.
 
     Args:
         cfg (dict): config dictionary.
-        nice (bool, optional): if use NICE-SLAM. Defaults to True.
 
     Returns:
        model (nn.module): network model.
     """
 
-    method = 'conv_onet'
-    model = method_dict[method].config.get_model(
-        cfg,  nice=nice)
+    model = networks.config.get_model(cfg)
 
     return model

@@ -3,6 +3,5 @@ mapping:
   bound: [[-1.1,9.8],[-1.0,10.0],[-1.0,4.3]]
   marching_cubes_bound: [[-1.1,9.8],[-1.0,10.0],[-1.0,4.3]]
 data:
-  input_folder: /idiap/temp/mjohari/Datasets/scannet/scans/scene0106_00
-#  output: /idiap/temp/mjohari/outputs/slam/scannet/s106_imp_w20_cl6_glob_sep5_imp_cl5_nru_tail50_dl15_nmsk_last2_
-  output: /idiap/temp/mjohari/outputs/slam/CVPR_4/ScanNet/scene0106/ours_3
+  input_folder: Datasets/scannet/scans/scene0106_00
+  output: output/scannet/scans/scene0106_00

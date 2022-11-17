@@ -1,3 +1,10 @@
+# *****************************************************************
+# This source code is only provided for the reviewing purpose of
+# CVPR 2023. The source files should not be kept or used in any
+# commercial or research products. Please delete all files after
+# the reviewing period.
+# *****************************************************************
+
 import os
 import time
 
@@ -10,33 +17,23 @@ from torch.autograd import Variable
 from src.common import (get_samples, random_select, matrix_to_pose6d, pose6d_to_matrix)
 from src.utils.datasets import get_dataset, SeqSampler
 from src.utils.Visualizer import Visualizer
-from src.tools.full_cull_mesh import cull_mesh
+from src.tools.cull_mesh import cull_mesh
 
 import torch.nn.functional as F
 from torch.utils.data import DataLoader
 
-from torch.optim import Adam
-
-
-from tqdm import tqdm
-
 class Mapper(object):
     """
-    Mapper thread. Note that coarse mapper also uses this code.
+    Mapper thread.
 
     """
 
-    def __init__(self, cfg, args, slam, coarse_mapper=False, aux_mapper=False
-                 ):
+    def __init__(self, cfg, args, slam):
 
-        self.stage = None
         self.cfg = cfg
         self.args = args
-        self.coarse_mapper = coarse_mapper
-        self.aux_mapper = aux_mapper
 
         self.idx = slam.idx
-        self.nice = slam.nice
         self.truncation = slam.truncation
         self.bound = slam.bound
         self.logger = slam.logger
@@ -61,41 +58,27 @@ class Mapper(object):
         self.mapping_first_frame = slam.mapping_first_frame
 
         self.scale = cfg['scale']
-        self.coarse = cfg['coarse']
-        self.occupancy = cfg['occupancy']
-        self.sync_method = cfg['sync_method']
 
         self.device = cfg['mapping']['device']
-        self.fix_fine = cfg['mapping']['fix_fine']
         self.eval_rec = cfg['meshing']['eval_rec']
         self.BA = False  # Even if BA is enabled, it starts only when there are at least 4 keyframes
         self.BA_cam_lr = cfg['mapping']['BA_cam_lr']
         self.mesh_freq = cfg['mapping']['mesh_freq']
         self.ckpt_freq = cfg['mapping']['ckpt_freq']
-        self.fix_color = cfg['mapping']['fix_color']
         self.mapping_pixels = cfg['mapping']['pixels']
         self.num_joint_iters = cfg['mapping']['iters']
-        self.clean_mesh = cfg['meshing']['clean_mesh']
         self.every_frame = cfg['mapping']['every_frame']
-        self.color_refine = cfg['mapping']['color_refine']
         self.w_color_loss = cfg['mapping']['w_color_loss']
         self.keyframe_every = cfg['mapping']['keyframe_every']
-        self.fine_iter_ratio = cfg['mapping']['fine_iter_ratio']
-        self.middle_iter_ratio = cfg['mapping']['middle_iter_ratio']
-        self.mesh_coarse_level = cfg['meshing']['mesh_coarse_level']
         self.mapping_window_size = cfg['mapping']['mapping_window_size']
         self.no_vis_on_first_frame = cfg['mapping']['no_vis_on_first_frame']
         self.no_log_on_first_frame = cfg['mapping']['no_log_on_first_frame']
         self.no_mesh_on_first_frame = cfg['mapping']['no_mesh_on_first_frame']
-        self.frustum_feature_selection = cfg['mapping']['frustum_feature_selection']
         self.keyframe_selection_method = cfg['mapping']['keyframe_selection_method']
         self.save_selected_keyframes_info = cfg['mapping']['save_selected_keyframes_info']
         if self.save_selected_keyframes_info:
             self.selected_keyframes = {}
 
-        if self.nice:
-            if coarse_mapper:
-                self.keyframe_selection_method = 'global'
 
         self.keyframe_dict = []
         self.keyframe_list = []
@@ -104,40 +87,11 @@ class Mapper(object):
         self.n_img = len(self.frame_reader)
         self.frame_loader = DataLoader(self.frame_reader, batch_size=1, num_workers=1, pin_memory=True, prefetch_factor=2, sampler=SeqSampler(self.n_img, self.every_frame))
 
-        ################################################
-        # ray_dataset = get_ray_dataset(cfg, args, self.scale, device=self.device)
-        # from tqdm import tqdm
-        # loader = DataLoader(ray_dataset, batch_size=1, num_workers=1, pin_memory=False, prefetch_factor=2)
-        # xx = iter(loader)
-        # for i in tqdm(range(10000000)):
-        #     _, gt_color, gt_depth, gt_c2w = self.frame_reader[i]
-        #     # xxx = next(xx)
-        #     # time.sleep(0.1)
-        #
-        # # _ = next(xx)
-
-        ################################################
-
-        if 'Demo' not in self.output:  # disable this visualization in demo
-            self.visualizer = Visualizer(freq=cfg['mapping']['vis_freq'], inside_freq=cfg['mapping']['vis_inside_freq'],
-                                         vis_dir=os.path.join(self.output, 'mapping_vis'), renderer=self.renderer,
-                                         truncation=self.truncation, verbose=self.verbose, device=self.device)
+        self.visualizer = Visualizer(freq=cfg['mapping']['vis_freq'], inside_freq=cfg['mapping']['vis_inside_freq'],
+                                     vis_dir=os.path.join(self.output, 'mapping_vis'), renderer=self.renderer,
+                                     truncation=self.truncation, verbose=self.verbose, device=self.device)
         self.H, self.W, self.fx, self.fy, self.cx, self.cy = slam.H, slam.W, slam.fx, slam.fy, slam.cx, slam.cy
 
-    # def sdf_loss(self, sdf, z_vals, gt_depth):
-    #     front_mask = torch.where(z_vals < (gt_depth[:, None] - self.truncation), torch.ones_like(z_vals), torch.zeros_like(z_vals)).bool()
-    #     back_mask = torch.where(z_vals > (gt_depth[:, None] + self.truncation), torch.ones_like(z_vals), torch.zeros_like(z_vals)).bool()
-    #     sdf_mask = (~front_mask) * (~back_mask)
-
-    #     fs_loss = torch.mean(torch.square(sdf[front_mask] - torch.ones_like(sdf[front_mask])))
-    #     # fs_loss = torch.mean(torch.abs(sdf[front_mask] - torch.ones_like(sdf[front_mask])))
-        
-    #     # side = 1 + 2 * (z_vals < gt_depth[:, None]).float()
-    #     side = 1
-    #     sdf_loss = torch.mean(torch.square((z_vals + sdf * side * self.truncation)[sdf_mask] - gt_depth[:, None].expand(z_vals.shape)[sdf_mask]))
-    #     # sdf_loss = torch.mean(torch.abs((z_vals + sdf * self.truncation)[sdf_mask] - gt_depth[:, None].expand(z_vals.shape)[sdf_mask]))
-
-    #     return 10 * fs_loss + 100 * sdf_loss
 
     def sdf_loss(self, sdf, z_vals, gt_depth):
         front_mask = torch.where(z_vals < (gt_depth[:, None] - self.truncation), torch.ones_like(z_vals), torch.zeros_like(z_vals)).bool()
@@ -146,101 +100,13 @@ class Mapper(object):
                         (z_vals < (gt_depth[:, None] + 0.4 * self.truncation)), torch.ones_like(z_vals), torch.zeros_like(z_vals)).bool()
         tail_mask = (~front_mask) * (~back_mask) * (~center_mask)
 
-        
         fs_loss = torch.mean(torch.square(sdf[front_mask] - torch.ones_like(sdf[front_mask])))
         center_loss = torch.mean(torch.square((z_vals + sdf * self.truncation)[center_mask] - gt_depth[:, None].expand(z_vals.shape)[center_mask]))
         tail_loss = torch.mean(torch.square((z_vals + sdf * self.truncation)[tail_mask] - gt_depth[:, None].expand(z_vals.shape)[tail_mask]))
        
-        # back_loss = torch.mean(torch.square(sdf[back_mask] + torch.ones_like(sdf[back_mask])))
-        # back_loss = torch.mean((sdf[:, :-1] - sdf[:, 1:])[back_mask[:, :-1]] ** 2)
-        # new_loss = torch.mean(torch.exp(-10 * sdf[back_mask].abs()))
-
-        # sdf_back = sdf[back_mask]
-        # back_loss = torch.mean(torch.minimum(torch.square(sdf_back + torch.ones_like(sdf_back)), torch.square(sdf_back - torch.ones_like(sdf_back))))
-
-        # return 5 * fs_loss + 200 * center_loss + 10 * tail_loss + 0.01 * back_loss + 0.001 * new_loss
-        # return 5 * fs_loss + 200 * center_loss + 10 * tail_loss + 0.001 * back_loss
         return 5 * fs_loss + 200 * center_loss + 10 * tail_loss
 
-    def get_mask_from_c2w(self, c2w, key, val_shape, depth_np):
-        """
-        Frustum feature selection based on current camera pose and depth image.
-
-        Args:
-            c2w (tensor): camera pose of current frame.
-            key (str): name of this feature grid.
-            val_shape (tensor): shape of the grid.
-            depth_np (numpy.array): depth image of current frame.
-
-        Returns:
-            mask (tensor): mask for selected optimizable feature.
-            points (tensor): corresponding point coordinates.
-        """
-        scale = 1
-        H, W, fx, fy, cx, cy, = self.H, self.W, self.fx, self.fy, self.cx, self.cy
-        X, Y, Z = torch.meshgrid(torch.linspace(self.bound[0][0], self.bound[0][1], val_shape[2] // scale),
-                                 torch.linspace(self.bound[1][0], self.bound[1][1], val_shape[1] // scale),
-                                 torch.linspace(self.bound[2][0], self.bound[2][1], val_shape[0] // scale))
-
-        points = torch.stack([X, Y, Z], dim=-1).reshape(-1, 3)
-        if key == 'grid_coarse':
-            mask = np.ones(val_shape[::-1]).astype(np.bool)
-            return mask
-        points_bak = points.clone()
-        c2w = c2w.cpu().numpy()
-        w2c = np.linalg.inv(c2w)
-        ones = np.ones_like(points[:, 0]).reshape(-1, 1)
-        homo_vertices = np.concatenate(
-            [points, ones], axis=1).reshape(-1, 4, 1)
-        cam_cord_homo = w2c@homo_vertices
-        cam_cord = cam_cord_homo[:, :3]
-        K = np.array([[fx, .0, cx], [.0, fy, cy], [.0, .0, 1.0]]).reshape(3, 3)
-        cam_cord[:, 0] *= -1
-        uv = K@cam_cord
-        z = uv[:, -1:]+1e-5
-        uv = uv[:, :2]/z
-        uv = uv.astype(np.float32)
-
-        remap_chunk = int(3e4)
-        depths = []
-        for i in range(0, uv.shape[0], remap_chunk):
-            depths += [cv2.remap(depth_np,
-                                 uv[i:i+remap_chunk, 0],
-                                 uv[i:i+remap_chunk, 1],
-                                 interpolation=cv2.INTER_LINEAR)[:, 0].reshape(-1, 1)]
-        depths = np.concatenate(depths, axis=0)
-
-        edge = 0
-        mask = (uv[:, 0] < W-edge)*(uv[:, 0] > edge) * \
-            (uv[:, 1] < H-edge)*(uv[:, 1] > edge)
-
-        # For ray with depth==0, fill it with maximum depth
-        zero_mask = (depths == 0)
-        depths[zero_mask] = np.max(depths)
-
-        # depth test
-        mask = mask & (0 <= -z[:, :, 0]) & (-z[:, :, 0] <= depths+0.5)
-        mask = mask.reshape(-1)
-
-        # add feature grid near cam center
-        ray_o = c2w[:3, 3]
-        ray_o = torch.from_numpy(ray_o).unsqueeze(0)
-
-        dist = points_bak-ray_o
-        dist = torch.sum(dist*dist, axis=1)
-        mask2 = dist < 0.5*0.5
-        mask2 = mask2.cpu().numpy()
-        mask = mask | mask2
-
-        points = points[mask]
-
-        mask = mask.reshape(val_shape[2] // scale, val_shape[1] // scale, val_shape[0] // scale)
-        mask = F.interpolate(torch.from_numpy(mask).float()[None][None], size=[val_shape[2], val_shape[1], val_shape[0]],
-                mode='nearest', align_corners=None, antialias=False)[0, 0].numpy() > 0
-
-        return mask
-
-    def keyframe_selection_overlap_old(self, gt_color, gt_depth, c2w, keyframe_dict, k, N_samples=16, pixels=100):
+    def keyframe_selection_overlap(self, gt_color, gt_depth, c2w, k, N_samples=8, pixels=50):
         """
         Select overlapping keyframes to the current camera observation.
 
@@ -248,73 +114,6 @@ class Mapper(object):
             gt_color (tensor): ground truth color image of the current frame.
             gt_depth (tensor): ground truth depth image of the current frame.
             c2w (tensor): camera to world matrix (3*4 or 4*4 both fine).
-            keyframe_dict (list): a list containing info for each keyframe.
-            k (int): number of overlapping keyframes to select.
-            N_samples (int, optional): number of samples/points per ray. Defaults to 16.
-            pixels (int, optional): number of pixels to sparsely sample
-                from the image of the current camera. Defaults to 100.
-        Returns:
-            selected_keyframe_list (list): list of selected keyframe id.
-        """
-        device = self.device
-        H, W, fx, fy, cx, cy = self.H, self.W, self.fx, self.fy, self.cx, self.cy
-
-        rays_o, rays_d, gt_depth, gt_color = get_samples(
-            0, H, 0, W, pixels, H, W, fx, fy, cx, cy, c2w.unsqueeze(0), gt_depth.unsqueeze(0), gt_color.unsqueeze(0), self.device)
-
-        gt_depth = gt_depth.reshape(-1, 1)
-        nonzero_depth = gt_depth[:, 0] > 0
-        rays_o = rays_o[nonzero_depth]
-        rays_d = rays_d[nonzero_depth]
-        gt_depth = gt_depth[nonzero_depth]
-        gt_depth = gt_depth.repeat(1, N_samples)
-        t_vals = torch.linspace(0., 1., steps=N_samples).to(device)
-        near = gt_depth*0.8
-        far = gt_depth+0.5
-        z_vals = near * (1.-t_vals) + far * (t_vals)
-        pts = rays_o[..., None, :] + rays_d[..., None, :] * \
-            z_vals[..., :, None]  # [N_rays, N_samples, 3]
-        pts = pts.reshape(-1, 3)
-        list_keyframe = []
-        for keyframeid, keyframe in enumerate(keyframe_dict):
-            c2w = keyframe['est_c2w'].clone()
-            w2c = torch.inverse(c2w)
-            ones = torch.ones_like(pts[:, 0], device=device).reshape(-1, 1)
-            homo_pts = torch.cat([pts, ones], dim=1).reshape(-1, 4, 1)  # (N, 4)
-            cam_cord_homo = w2c @ homo_pts  # (N, 4, 1)=(4,4)*(N, 4, 1)
-            cam_cord = cam_cord_homo[:, :3]  # (N, 3, 1)
-            K = torch.tensor([[fx, .0, cx], [.0, fy, cy],
-                          [.0, .0, 1.0]], device=device).reshape(3, 3)
-            cam_cord[:, 0] *= -1
-            uv = K @ cam_cord
-            z = uv[:, -1:] + 1e-5
-            uv = uv[:, :2] / z
-            edge = 20
-            mask = (uv[:, 0] < W-edge)*(uv[:, 0] > edge) * \
-                (uv[:, 1] < H-edge)*(uv[:, 1] > edge)
-            mask = mask & (z[:, :, 0] < 0)
-            mask = mask.reshape(-1)
-            percent_inside = mask.sum() / uv.shape[0]
-            list_keyframe.append(
-                {'id': keyframeid, 'percent_inside': percent_inside.item()})
-
-        print('old:')
-        print([(dic['id'], dic['percent_inside'])  for dic in list_keyframe])
-
-        selected_keyframe_list = [dic['id'] for dic in list_keyframe if dic['percent_inside'] > 0.00]
-        selected_keyframe_list = list(np.random.permutation(np.array(selected_keyframe_list))[:k])
-
-        return selected_keyframe_list
-
-    def keyframe_selection_overlap(self, gt_color, gt_depth, c2w, keyframe_dict, k, N_samples=8, pixels=50):
-        """
-        Select overlapping keyframes to the current camera observation.
-
-        Args:
-            gt_color (tensor): ground truth color image of the current frame.
-            gt_depth (tensor): ground truth depth image of the current frame.
-            c2w (tensor): camera to world matrix (3*4 or 4*4 both fine).
-            keyframe_dict (list): a list containing info for each keyframe.
             k (int): number of overlapping keyframes to select.
             N_samples (int, optional): number of samples/points per ray. Defaults to 16.
             pixels (int, optional): number of pixels to sparsely sample
@@ -341,13 +140,6 @@ class Mapper(object):
         pts = rays_o[..., None, :] + rays_d[..., None, :] * \
             z_vals[..., :, None]  # [N_rays, N_samples, 3]
         pts = pts.reshape(1, -1, 3)
-
-        # c2ws = []
-        # for keyframe in keyframe_dict:
-        #     c2ws.append(keyframe['est_c2w'])
-        # c2ws = torch.stack(c2ws, dim=0)
-
-        # c2ws = torch.cat(self.rough_key_c2ws, dim=0)
 
         w2cs = torch.inverse(self.rough_key_c2ws[:-2])
         ones = torch.ones_like(pts[..., 0], device=device).reshape(1, -1, 1)
@@ -411,10 +203,9 @@ class Mapper(object):
                 optimize_frame = random_select(len(self.keyframe_dict)-2, num)
             elif self.keyframe_selection_method == 'overlap':
                 num = self.mapping_window_size-1
-                # optimize_frame = self.keyframe_selection_overlap_old(cur_gt_color, cur_gt_depth, cur_c2w, keyframe_dict, num)
-                optimize_frame = self.keyframe_selection_overlap(cur_gt_color, cur_gt_depth, cur_c2w, keyframe_dict, num)
+                optimize_frame = self.keyframe_selection_overlap(cur_gt_color, cur_gt_depth, cur_c2w, num)
 
-        # add the last keyframe and the current frame(use -1 to denote)
+        # add the last two keyframes and the current frame(use -1 to denote)
         if len(keyframe_list) > 1:
             optimize_frame = optimize_frame + [len(keyframe_list)-1] + [len(keyframe_list)-2]
             optimize_frame = sorted(optimize_frame)
@@ -460,7 +251,6 @@ class Mapper(object):
         gt_c2ws = []
         for frame in optimize_frame:
             # the oldest frame should be fixed to avoid drifting
-            # if frame != oldest_frame:
             if frame != -1:
                 gt_depths.append(keyframe_dict[frame]['depth'])
                 gt_colors.append(keyframe_dict[frame]['color'])
@@ -474,48 +264,32 @@ class Mapper(object):
         gt_depths = torch.stack(gt_depths, dim=0)
         gt_colors = torch.stack(gt_colors, dim=0)
         c2ws = torch.stack(c2ws, dim=0)
-        gt_c2ws = torch.stack(gt_c2ws, dim=0)
 
         if self.BA:
             pose6ds = Variable(matrix_to_pose6d(c2ws[1:]), requires_grad=True)
-            # gt_pose6ds = matrix_to_pose6d(gt_c2ws)
 
-            # The corresponding lr will be set according to which stage the optimization is in
             optimizer = torch.optim.Adam([{'params': decoders_para_list, 'lr': 0},
                               {'params': planes_para, 'lr': 0},
                               {'params': c_planes_para, 'lr': 0},
-                              {'params': [pose6ds], 'lr': 0, 'betas':(0.9, 0.999)}])
+                              {'params': [pose6ds], 'lr': 0}])
 
-            # optimizer = torch.optim.Adam([{'params': decoders_para_list, 'lr': 0},
-            #                   {'params': planes_para, 'lr': 0},
-            #                   {'params': c_planes_para, 'lr': 0}])
         else:
             optimizer = torch.optim.Adam([{'params': decoders_para_list, 'lr': 0},
                                           {'params': planes_para, 'lr': 0},
                                           {'params': c_planes_para, 'lr': 0}])
 
         for joint_iter in range(num_joint_iters):
-            self.stage = 'color'
-
-            optimizer.param_groups[0]['lr'] = cfg['mapping']['stage'][self.stage]['decoders_lr']*lr_factor
-            optimizer.param_groups[1]['lr'] = cfg['mapping']['stage'][self.stage]['fine_lr']*lr_factor
-
-            # if joint_iter >= 10:
-            optimizer.param_groups[2]['lr'] = cfg['mapping']['stage'][self.stage]['color_lr'] * lr_factor
+            optimizer.param_groups[0]['lr'] = cfg['mapping']['lr']['decoders_lr'] * lr_factor
+            optimizer.param_groups[1]['lr'] = cfg['mapping']['lr']['planes_lr'] * lr_factor
+            optimizer.param_groups[2]['lr'] = cfg['mapping']['lr']['c_planes_lr'] * lr_factor
 
             if self.BA:
-                if self.stage == 'color':
-                    optimizer.param_groups[3]['lr'] = self.BA_cam_lr
-                # if joint_iter >= 5:
-                #     optimizer.param_groups[3]['lr'] = self.BA_cam_lr
-                    # optimizer.add_param_group({'params': [pose6ds], 'lr': 0.0001, 'betas': (0.9, 0.999)})
+                optimizer.param_groups[3]['lr'] = self.BA_cam_lr
 
-
-            if (not (idx == 0 and self.no_vis_on_first_frame)) and ('Demo' not in self.output) and (not self.aux_mapper):
+            if (not (idx == 0 and self.no_vis_on_first_frame)):
                 self.visualizer.vis(
                     idx, joint_iter, cur_gt_depth, cur_gt_color, cur_c2w, all_planes, self.decoders, wandb_q)
 
-            # with torch.autocast(device_type='cuda', dtype=torch.bfloat16):
             if self.BA:
                 c2ws_ = torch.cat([c2ws[0:1], pose6d_to_matrix(pose6ds)], dim=0)
             else:
@@ -525,101 +299,34 @@ class Mapper(object):
                 0, H, 0, W, pixs_per_image, H, W, fx, fy, cx, cy, c2ws_, gt_depths, gt_colors, self.device)
 
 
-            if self.nice:
-                # should pre-filter those out of bounding box depth value
-                with torch.no_grad():
-                    det_rays_o = batch_rays_o.clone().detach().unsqueeze(-1)  # (N, 3, 1)
-                    det_rays_d = batch_rays_d.clone().detach().unsqueeze(-1)  # (N, 3, 1)
-                    t = (self.bound.unsqueeze(0).to(
-                        device)-det_rays_o)/det_rays_d
-                    t, _ = torch.min(torch.max(t, dim=2)[0], dim=1)
-                    inside_mask = t >= batch_gt_depth
-                batch_rays_d = batch_rays_d[inside_mask]
-                batch_rays_o = batch_rays_o[inside_mask]
-                batch_gt_depth = batch_gt_depth[inside_mask]
-                batch_gt_color = batch_gt_color[inside_mask]
+            # should pre-filter those out of bounding box depth value
+            with torch.no_grad():
+                det_rays_o = batch_rays_o.clone().detach().unsqueeze(-1)  # (N, 3, 1)
+                det_rays_d = batch_rays_d.clone().detach().unsqueeze(-1)  # (N, 3, 1)
+                t = (self.bound.unsqueeze(0).to(
+                    device)-det_rays_o)/det_rays_d
+                t, _ = torch.min(torch.max(t, dim=2)[0], dim=1)
+                inside_mask = t >= batch_gt_depth
+            batch_rays_d = batch_rays_d[inside_mask]
+            batch_rays_o = batch_rays_o[inside_mask]
+            batch_gt_depth = batch_gt_depth[inside_mask]
+            batch_gt_color = batch_gt_color[inside_mask]
 
-            ret = self.renderer.no_render_batch_ray(all_planes, self.decoders, batch_rays_d,
-                                                    batch_rays_o, device, self.stage, self.truncation,
-                                                    gt_depth=None if self.coarse_mapper else batch_gt_depth)
+            ret = self.renderer.render_batch_ray(all_planes, self.decoders, batch_rays_d,
+                                                 batch_rays_o, device, self.truncation,
+                                                 gt_depth=batch_gt_depth)
             depth, color, sdf, z_vals = ret
 
             depth_mask = (batch_gt_depth > 0)
             loss = self.sdf_loss(sdf[depth_mask], z_vals[depth_mask], batch_gt_depth[depth_mask])
 
-            ## Sepehr Color loss
-            if ((not self.nice) or (self.stage == 'color')):
-                color_loss = torch.square(batch_gt_color - color).mean()
-                weighted_color_loss = self.w_color_loss * color_loss
-                loss += weighted_color_loss
+            ## Color loss
+            color_loss = torch.square(batch_gt_color - color).mean()
+            weighted_color_loss = self.w_color_loss * color_loss
+            loss += weighted_color_loss
 
             ### Depth loss
             loss = loss + 0.1 * torch.square(batch_gt_depth[depth_mask] - depth[depth_mask]).mean()
-
-            ## TV loss
-            # for planes in all_planes[:3]:
-            #     for plane in planes:
-            #         tv1 = torch.pow((plane[..., 1:] - plane[..., :-1]), 2).sum()
-            #         tv2 = torch.pow((plane[..., 1:, :] - plane[..., :-1, :]), 2).sum()
-            #         loss = loss + 0.0001 * (tv1 + tv2)
-
-            # ## Stupid loss function
-            # loss = loss + 5 * torch.mean(torch.square(sdf - torch.ones_like(sdf)))
-
-            # regulation_loss = entr[~depth_mask].mean()
-            # regulation_loss = entr.mean()
-            # # print('loss: ', loss.item(), 'reg loss: ', regulation_loss.item())
-            # loss += 0.5 * regulation_loss
-
-
-            # if idx == self.n_img - 1:
-            #     print('stage: ', self.stage)
-            #     for key, val in c.items():
-            #         if (self.coarse_mapper and 'coarse' in key) or \
-            #                 ((not self.coarse_mapper) and ('coarse' not in key) and ('color' not in key)):
-            #             print(key, val.shape)
-            #             tv1 = torch.pow((val[..., 1:] - val[...,:-1]),2).sum()
-            #             tv2 = torch.pow((val[..., 1:, :] - val[...,:-1, :]),2).sum()
-            #             tv3 = torch.pow((val[..., 1:, :, :] - val[...,:-1, :, :]),2).sum()
-            #             tv_loss = tv1 + tv2 + tv3
-            #             print('tv loss: ', tv_loss.item())
-
-            # regulation_loss = entr.mean()
-            # print('loss: ', loss.item(), 'reg loss: ', regulation_loss.item())
-            # loss += 5 * regulation_loss
-
-            # for key, val in c.items():
-            #     if (self.coarse_mapper and 'coarse' in key) or \
-            #             ((not self.coarse_mapper) and ('coarse' not in key) and ('color' not in key)):
-            #         # print(key, val.shape)
-            #         tv1 = torch.pow((val[..., 1:] - val[...,:-1]),2).mean()
-            #         tv2 = torch.pow((val[..., 1:, :] - val[...,:-1, :]),2).mean()
-            #         tv3 = torch.pow((val[..., 1:, :, :] - val[...,:-1, :, :]),2).mean()
-            #         tv_loss = tv1 + tv2 + tv3
-            #         # print('loss: ', loss, 'tv loss: ', tv_loss.item())
-            #         loss += 0.01 * tv_loss
-
-            # for key in ['grid_middle', 'grid_fine']:
-            #     tv1 = (torch.pow((c[key][..., 1:] - c[key][...,:-1]),2) * self.c_mask[key][...,:-1]).sum() / (self.c_mask[key][...,:-1].sum() + 1e-6)
-            #     tv2 = (torch.pow((c[key][..., 1:, :] - c[key][...,:-1, :]),2) * self.c_mask[key][...,:-1, :]).sum() / (self.c_mask[key][...,:-1, :].sum() + 1e-6)
-            #     tv3 = (torch.pow((c[key][..., 1:, :, :] - c[key][...,:-1, :, :]),2) * self.c_mask[key][...,:-1, :, :]).sum() / (self.c_mask[key][...,:-1, :, :].sum() + 1e-6)
-            #     tv_loss = tv1 + tv2 + tv3
-            #     # print('loss: ', loss, 'tv loss: ', tv_loss.item())
-            #     loss += 0.01 * tv_loss
-
-            # pooling = {'grid_middle': torch.nn.AvgPool3d(3, stride=1, padding=1, count_include_pad=False),
-            #            'grid_fine': torch.nn.AvgPool3d(3, stride=1, padding=1, count_include_pad=False)
-            #            }
-            # for key in ['grid_middle', 'grid_fine']:
-            #     # for key in ['grid_middle']:
-            #     tv_loss = (torch.pow(c[key] - pooling[key](c[key].detach()), 2) * self.c_mask[key]).sum() / (self.c_mask[key].sum() + 1e-6)
-            #
-            #     # p3d = (1, 1, 1, 1, 1, 1)
-            #     # c_padded = F.pad(c[key].detach(), p3d, "constant", -1)
-            #     # # mask_padded = F.pad(self.c_mask[key], p3d, "constant", 0)
-            #     # tv_loss = (torch.pow(c[key] - pooling[key](c_padded), 2) * self.c_mask[key]).sum() / (self.c_mask[key].sum() + 1e-6)
-            #
-            #     loss += 0.5 * tv_loss
 
             optimizer.zero_grad()
             loss.backward(retain_graph=False)
@@ -649,7 +356,6 @@ class Mapper(object):
 
         self.estimate_c2w_list[0] = gt_c2w
         self.rough_key_c2ws = None
-        # self.rough_key_c2ws = []
 
         init = True
         prev_idx = -1
@@ -658,17 +364,10 @@ class Mapper(object):
                 idx = self.idx[0].clone()
                 if idx == self.n_img-1:
                     break
-                
-                if self.sync_method == 'strict':
-                    if idx % self.every_frame == 0 and idx != prev_idx:
-                        break
 
-                elif self.sync_method == 'loose':
-                    if idx == 0 or idx >= prev_idx+self.every_frame//2:
-                        break
-                elif self.sync_method == 'free':
+                if idx % self.every_frame == 0 and idx != prev_idx:
                     break
-                
+
                 time.sleep(0.001)
             prev_idx = idx
 
@@ -676,33 +375,15 @@ class Mapper(object):
 
             if self.verbose:
                 print(Fore.GREEN)
-                prefix = 'Coarse ' if self.coarse_mapper else ''
-                prefix = 'Auxiliary ' if self.aux_mapper else ''
-                print(prefix+"Mapping Frame ", idx.item())
+                print("Mapping Frame ", idx.item())
                 print(Style.RESET_ALL)
 
-            # _, gt_color, gt_depth, gt_c2w = self.frame_reader[idx]
             _, gt_color, gt_depth, gt_c2w = next(data_iter)
-            # gt_color, gt_depth, gt_c2w = gt_color.squeeze(0), gt_depth.squeeze(0), gt_c2w.squeeze(0)
             gt_color, gt_depth, gt_c2w = gt_color.squeeze(0).to(self.device, non_blocking=True), gt_depth.squeeze(0).to(self.device, non_blocking=True), gt_c2w.squeeze(0).to(self.device, non_blocking=True)
             if not init:
                 lr_factor = cfg['mapping']['lr_factor']
                 num_joint_iters = cfg['mapping']['iters']
-
-                # here provides a color refinement postprocess
-                if idx == self.n_img-1 and self.color_refine and not self.coarse_mapper:
-                    outer_joint_iters = 10
-                    self.mapping_window_size *= 4
-                    self.middle_iter_ratio = 0.0
-                    self.fine_iter_ratio = 0.0
-                    num_joint_iters *= 5
-                    self.fix_color = True
-                    self.frustum_feature_selection = False
-                else:
-                    if self.nice:
-                        outer_joint_iters = 1
-                    else:
-                        outer_joint_iters = 3
+                outer_joint_iters = 1
 
             else:
                 outer_joint_iters = 1
@@ -713,8 +394,7 @@ class Mapper(object):
             num_joint_iters = num_joint_iters//outer_joint_iters
             for outer_joint_iter in range(outer_joint_iters):
 
-                self.BA = (len(self.keyframe_list) > 4) and cfg['mapping']['BA'] and (
-                    not self.coarse_mapper) and (not self.aux_mapper)
+                self.BA = (len(self.keyframe_list) > 4) and cfg['mapping']['BA']
 
                 _ = self.optimize_map(num_joint_iters, lr_factor, idx, gt_color, gt_depth,
                                       gt_c2w, self.keyframe_dict, self.keyframe_list, cur_c2w=cur_c2w, wandb_q=wandb_q)
@@ -728,62 +408,45 @@ class Mapper(object):
                     if (idx % self.keyframe_every == 0 or (idx == self.n_img-2)) \
                             and (idx not in self.keyframe_list):
                         self.keyframe_list.append(idx)
-                        # self.keyframe_dict.append({'gt_c2w': gt_c2w.cpu(), 'idx': idx, 'color': gt_color.cpu(
-                        # ), 'depth': gt_depth.cpu(), 'est_c2w': cur_c2w.clone()})
                         self.keyframe_dict.append({'gt_c2w': gt_c2w, 'idx': idx, 'color': gt_color,
                                                    'depth': gt_depth, 'est_c2w': cur_c2w.clone()})
 
-                        # self.rough_key_c2ws.append(cur_c2w.unsqueeze(0).clone())
                         if self.rough_key_c2ws is None:
                             self.rough_key_c2ws = cur_c2w.unsqueeze(0).clone()
                         else:
                             self.rough_key_c2ws = torch.cat([self.rough_key_c2ws, cur_c2w.unsqueeze(0).clone()], dim=0)
 
             if self.verbose:
-                prefix = 'Auxiliary' if self.aux_mapper else ''
-                print("---%s Mapping Time: %s seconds ---" % (prefix, (time.time() - start_time)))
+                print("---Mapping Time: %s seconds ---" % (time.time() - start_time))
 
             if self.low_gpu_mem:
                 torch.cuda.empty_cache()
 
             init = False
+            # mapping of first frame is done, can begin tracking
+            self.mapping_first_frame[0] = 1
 
-            if (not self.coarse_mapper) and (not self.aux_mapper):
-                # mapping of first frame is done, can begin tracking
-                self.mapping_first_frame[0] = 1
+            if ((not (idx == 0 and self.no_log_on_first_frame)) and idx % self.ckpt_freq == 0) \
+                    or idx == self.n_img-1:
+                self.logger.log(idx, self.keyframe_dict, self.keyframe_list,
+                                selected_keyframes=self.selected_keyframes
+                                if self.save_selected_keyframes_info else None)
 
-                if ((not (idx == 0 and self.no_log_on_first_frame)) and idx % self.ckpt_freq == 0) \
-                        or idx == self.n_img-1:
-                    self.logger.log(idx, self.keyframe_dict, self.keyframe_list,
-                                    selected_keyframes=self.selected_keyframes
-                                    if self.save_selected_keyframes_info else None)
+            self.mapping_idx[0] = idx
+            self.mapping_cnt[0] += 1
 
-                self.mapping_idx[0] = idx
-                self.mapping_cnt[0] += 1
+            if (idx % self.mesh_freq == 0) and (not (idx == 0 and self.no_mesh_on_first_frame)):
+                mesh_out_file = f'{self.output}/mesh/{idx:05d}_mesh.ply'
+                self.mesher.get_mesh(mesh_out_file, all_planes, self.decoders, self.keyframe_dict, self.device)
 
-                if (idx % self.mesh_freq == 0) and (not (idx == 0 and self.no_mesh_on_first_frame)):
-                    mesh_out_file = f'{self.output}/mesh/{idx:05d}_mesh.ply'
-                    self.mesher.get_mesh(mesh_out_file, all_planes, self.decoders, self.keyframe_dict, self.estimate_c2w_list,
-                                         idx,  self.device, show_forecast=self.mesh_coarse_level,
-                                         clean_mesh=self.clean_mesh, get_mask_use_all_frames=False)
+            if idx == self.n_img-1:
+                if self.eval_rec:
+                    mesh_out_file = f'{self.output}/mesh/final_mesh_eval_rec.ply'
+                    self.mesher.get_mesh(mesh_out_file, all_planes, self.decoders, self.keyframe_dict, self.device)
 
-                if idx == self.n_img-1:
-                    # mesh_out_file = f'{self.output}/mesh/final_mesh.ply'
-                    # self.mesher.get_mesh(mesh_out_file, self.c, self.decoders, self.keyframe_dict, self.estimate_c2w_list,
-                    #                      idx,  self.device, show_forecast=self.mesh_coarse_level,
-                    #                      clean_mesh=self.clean_mesh, get_mask_use_all_frames=False)
-                    # os.system(
-                    #     f"cp {mesh_out_file} {self.output}/mesh/{idx:05d}_mesh.ply")
-                    
-                    if self.eval_rec:
-                        mesh_out_file = f'{self.output}/mesh/final_mesh_eval_rec.ply'
-                        self.mesher.get_mesh(mesh_out_file, all_planes, self.decoders, self.keyframe_dict,
-                                             self.estimate_c2w_list, idx, self.device, show_forecast=False,
-                                             clean_mesh=self.clean_mesh, get_mask_use_all_frames=True)
+                    cull_mesh(mesh_out_file, self.cfg, self.args, self.device, estimate_c2w_list=self.estimate_c2w_list)
 
-                        cull_mesh(mesh_out_file, self.cfg, self.args, self.device, estimate_c2w_list=self.estimate_c2w_list)
-
-                    break
+                break
 
             if idx == self.n_img-1:
                 break
