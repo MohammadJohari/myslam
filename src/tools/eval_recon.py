@@ -7,7 +7,6 @@ import torch
 import trimesh
 from scipy.spatial import cKDTree as KDTree
 
-
 def normalize(x):
     return x / np.linalg.norm(x)
 
@@ -143,7 +142,8 @@ def calc_2d_metric(rec_meshfile, gt_meshfile, align=True, n_imgs=1000):
 
     gt_mesh = o3d.io.read_triangle_mesh(gt_meshfile)
     rec_mesh = o3d.io.read_triangle_mesh(rec_meshfile)
-    unseen_gt_pointcloud_file = gt_meshfile.replace('.ply', '_pc_unseen.npy')
+    # unseen_gt_pointcloud_file = gt_meshfile.replace('.ply', '_pc_unseen.npy')
+    unseen_gt_pointcloud_file = gt_meshfile.replace('_culled.ply', '_pc_unseen.npy')
     pc_unseen = np.load(unseen_gt_pointcloud_file)
     if align:
         transformation = get_align_transformation(rec_meshfile, gt_meshfile)

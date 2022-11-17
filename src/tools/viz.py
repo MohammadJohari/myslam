@@ -105,9 +105,19 @@ def draw_trajectory(queue, output, init_pose, cam_scale,
                 elif data[0] == 'traj':
                     i, is_gt = data[1:]
 
-                    color = (0.0, 0.0, 0.0) if is_gt else (1.0, .0, .0)
+                    color = (0.0, 1.0, 0.0) if is_gt else (1.0, .0, .0)
+
+                    if is_gt:
+                        # pts = gt_c2w_list[1:i, :3, 3]
+                        pts = np.random.uniform(-0.005, 0.005, size=[20, i - 1, 3]) + gt_c2w_list[0:i, :3, 3]
+                        pts = pts[np.isfinite(pts).all(-1)]
+                    else:
+                        # pts = estimate_c2w_list[1:i, :3, 3]
+                        pts = np.random.uniform(-0.005, 0.005, size=[20, i - 1, 3]) + estimate_c2w_list[0:i, :3, 3]
+                    pts = pts.reshape(-1, 3)
+
                     traj_actor = o3d.geometry.PointCloud(
-                        points=o3d.utility.Vector3dVector(gt_c2w_list[1:i, :3, 3] if is_gt else estimate_c2w_list[1:i, :3, 3]))
+                        points=o3d.utility.Vector3dVector(pts))
                     traj_actor.paint_uniform_color(color)
 
                     if is_gt:
@@ -167,7 +177,7 @@ def draw_trajectory(queue, output, init_pose, cam_scale,
     # set the viewer's pose in the back of the first frame's pose
     param = ctr.convert_to_pinhole_camera_parameters()
     ## Zooming level
-    init_pose[:3, 3] += 2 * normalize(init_pose[:3, 2])
+    init_pose[:3, 3] += 4.0 * normalize(init_pose[:3, 2])
     # init_pose[:3, 3] += 6 * normalize(init_pose[:3, 2])
     init_pose[:3, 2] *= -1
     init_pose[:3, 1] *= -1

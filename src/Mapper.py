@@ -491,8 +491,8 @@ class Mapper(object):
             #                   {'params': c_planes_para, 'lr': 0}])
         else:
             optimizer = torch.optim.Adam([{'params': decoders_para_list, 'lr': 0},
-                              {'params': planes_para, 'lr': 0},
-                              {'params': c_planes_para, 'lr': 0}])
+                                          {'params': planes_para, 'lr': 0},
+                                          {'params': c_planes_para, 'lr': 0}])
 
         for joint_iter in range(num_joint_iters):
             self.stage = 'color'

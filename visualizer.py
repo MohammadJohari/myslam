@@ -60,16 +60,12 @@ if __name__ == '__main__':
 
 
     # ## Setting view point
-    # # meshfile = f'{output}/mesh/final_mesh_eval_rec_culled.ply'
-    # meshfile = f'/idiap/temp/mjohari/Datasets/scannet/scans/scene0000_00/scene0000_00_vh_clean.ply'
-    # if os.path.isfile(meshfile):
-    #     mesh = trimesh.load(meshfile, process=False)
-    #     mesh.invert()
-    #     to_origin, _ = trimesh.bounds.oriented_bounds(mesh, ordered=False)
-    #     init_pose = np.eye(4)
-    #     init_pose = np.linalg.inv(to_origin) @ init_pose
-    init_pose = estimate_c2w_list[800]
-
+    meshfile = f'{output}/mesh/final_mesh_eval_rec.ply'
+    if os.path.isfile(meshfile):
+        mesh = trimesh.load(meshfile, process=False)
+        to_origin, _ = trimesh.bounds.oriented_bounds(mesh, ordered=False)
+        init_pose = np.eye(4)
+        init_pose = np.linalg.inv(to_origin) @ init_pose
 
     frontend = SLAMFrontend(output, init_pose=init_pose, cam_scale=0.1,
                             save_rendering=args.save_rendering, near=0,
@@ -77,41 +73,42 @@ if __name__ == '__main__':
     frontend.start()
 
     ## Simple Image
-    meshfile = f'{output}/mesh/final_mesh_eval_rec.ply'
-    # meshfile = f'cull_replica_mesh/room0.ply'
-    frontend.update_mesh(meshfile)
+    # meshfile = f'{output}/mesh/final_mesh_eval_rec.ply'
+    # frontend.update_mesh(meshfile)
+    # frontend.update_cam_trajectory(len(estimate_c2w_list), gt=False)
+    # frontend.update_cam_trajectory(len(estimate_c2w_list), gt=True)
 
     ##### Video
-    # for i in tqdm(range(0, N+1)):
-    #     # show every second frame for speed up
-    #     if args.vis_input_frame and i % 2 == 0:
-    #         idx, gt_color, gt_depth, gt_c2w = frame_reader[i]
-    #         depth_np = gt_depth.numpy()
-    #         color_np = (gt_color.numpy()*255).astype(np.uint8)
-    #         depth_np = depth_np/np.max(depth_np)*255
-    #         depth_np = np.clip(depth_np, 0, 255).astype(np.uint8)
-    #         depth_np = cv2.applyColorMap(depth_np, cv2.COLORMAP_JET)
-    #         color_np = np.clip(color_np, 0, 255)
-    #         whole = np.concatenate([color_np, depth_np], axis=0)
-    #         H, W, _ = whole.shape
-    #         whole = cv2.resize(whole, (W//4, H//4))
-    #         cv2.imshow(f'Input RGB-D Sequence', whole[:, :, ::-1])
-    #         cv2.waitKey(1)
-    #     meshfile = f'{output}/mesh/{i:05d}_mesh.ply'
-    #     if os.path.isfile(meshfile):
-    #         frontend.update_mesh(meshfile)
-    #     frontend.update_pose(1, estimate_c2w_list[i], gt=False)
-    #     if not args.no_gt_traj:
-    #         frontend.update_pose(1, gt_c2w_list[i], gt=True)
-    #     # the visualizer might get stucked if update every frame
-    #     # with a long sequence (10000+ frames)
-    #     if i % 10 == 0:
-    #         frontend.update_cam_trajectory(i, gt=False)
-    #         if not args.no_gt_traj:
-    #             frontend.update_cam_trajectory(i, gt=True)
-    #     time.sleep(0.03)
-    #
-    # if args.save_rendering:
-    #     time.sleep(1)
-    #     os.system(
-    #         f"/usr/bin/ffmpeg -f image2 -r 30 -pattern_type glob -i '{output}/tmp_rendering/*.jpg' -y {output}/vis.mp4")
+    for i in tqdm(range(0, N+1)):
+        # show every second frame for speed up
+        if args.vis_input_frame and i % 2 == 0:
+            idx, gt_color, gt_depth, gt_c2w = frame_reader[i]
+            depth_np = gt_depth.numpy()
+            color_np = (gt_color.numpy()*255).astype(np.uint8)
+            depth_np = depth_np/np.max(depth_np)*255
+            depth_np = np.clip(depth_np, 0, 255).astype(np.uint8)
+            depth_np = cv2.applyColorMap(depth_np, cv2.COLORMAP_JET)
+            color_np = np.clip(color_np, 0, 255)
+            whole = np.concatenate([color_np, depth_np], axis=0)
+            H, W, _ = whole.shape
+            whole = cv2.resize(whole, (W//4, H//4))
+            cv2.imshow(f'Input RGB-D Sequence', whole[:, :, ::-1])
+            cv2.waitKey(1)
+        meshfile = f'{output}/mesh/{i:05d}_mesh.ply'
+        if os.path.isfile(meshfile):
+            frontend.update_mesh(meshfile)
+        frontend.update_pose(1, estimate_c2w_list[i], gt=False)
+        if not args.no_gt_traj:
+            frontend.update_pose(1, gt_c2w_list[i], gt=True)
+        # the visualizer might get stucked if update every frame
+        # with a long sequence (10000+ frames)
+        if i % 10 == 0:
+            frontend.update_cam_trajectory(i, gt=False)
+            if not args.no_gt_traj:
+                frontend.update_cam_trajectory(i, gt=True)
+        time.sleep(0.3)
+
+    if args.save_rendering:
+        time.sleep(1)
+        os.system(
+            f"/usr/bin/ffmpeg -f image2 -r 30 -pattern_type glob -i '{output}/tmp_rendering/*.jpg' -y {output}/vis.mp4")

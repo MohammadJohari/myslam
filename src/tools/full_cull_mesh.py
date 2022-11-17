@@ -82,31 +82,12 @@ if __name__ == '__main__':
         description='Arguments to cull the mesh.'
     )
 
+    parser.add_argument('config', type=str,  help='path to the config file')
     parser.add_argument('--input_mesh', type=str, help='path to the mesh to be culled')
-    parser.add_argument('--config', type=str,  help='path to the config file')
 
     args = parser.parse_args()
     args.input_folder = None
 
     cfg = config.load_config(args.config, 'configs/nice_slam.yaml')
-
-
-
-
-
-
-    # output = cfg['data']['output']
-    # ckptsdir = f'{output}/ckpts'
-    #
-    # if os.path.exists(ckptsdir):
-    #     ckpts = [os.path.join(ckptsdir, f)
-    #              for f in sorted(os.listdir(ckptsdir)) if 'tar' in f]
-    #     if len(ckpts) > 0:
-    #         ckpt_path = ckpts[-1]
-    #         ckpt = torch.load(ckpt_path, map_location='cpu')
-    #         estimate_c2w_list = ckpt['estimate_c2w_list']
-
-
-
 
     cull_mesh(args.input_mesh, cfg, args, 'cuda')

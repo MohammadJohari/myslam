@@ -68,11 +68,6 @@ class Visualizer(object):
                 color_residual = np.abs(gt_color_np - color_np)
                 color_residual[gt_depth_np == 0.0] = 0.0
 
-                # wandb_q.put(({
-                #     "Depth Error": depth_residual.mean(),
-                #     "Color Error": color_residual.mean()
-                #     }, None))
-
                 fig, axs = plt.subplots(2, 3)
                 fig.tight_layout()
                 max_depth = np.max(gt_depth_np)
