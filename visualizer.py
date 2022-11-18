@@ -68,7 +68,7 @@ if __name__ == '__main__':
         init_pose = np.eye(4)
         init_pose = np.linalg.inv(to_origin) @ init_pose
 
-    frontend = SLAMFrontend(output, init_pose=init_pose, cam_scale=0.1,
+    frontend = SLAMFrontend(output, init_pose=init_pose, cam_scale=0.3,
                             save_rendering=args.save_rendering, near=0,
                             estimate_c2w_list=estimate_c2w_list, gt_c2w_list=gt_c2w_list)
     frontend.start()
@@ -105,7 +105,7 @@ if __name__ == '__main__':
             frontend.update_cam_trajectory(i, gt=False)
             if not args.no_gt_traj:
                 frontend.update_cam_trajectory(i, gt=True)
-        time.sleep(0.3)
+        time.sleep(0.5)
 
     time.sleep(1)
     frontend.terminate()

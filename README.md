@@ -82,7 +82,7 @@ To evaluate the reconstruction error, first download the ground truth Replica me
 ```bash
 bash scripts/download_replica_mesh.sh
 ```
-Then run the `cull_mesh.py` code to exclude the unseen and occluded regions from evaluation.
+Then run the `cull_mesh.py` with the following commands to exclude the unseen and occluded regions from evaluation.
 ```bash
 # An example for room0 of Replica
 # this code should create a culled mesh named 'room0_culled.ply'
@@ -99,13 +99,16 @@ python src/tools/eval_recon.py --rec_mesh $OUTPUT_FOLDER/mesh/final_mesh_eval_re
 ```
 
 ## Visualizing ESLAM Results
-For visualizing the results, we recommend to set `mesh_freq:40` in [configs/ESLAM.yaml](configs/ESLAM.yaml) and run the following.
+For visualizing the results, we recommend to set `mesh_freq:40` in [configs/ESLAM.yaml](configs/ESLAM.yaml) and run ESLAM from scratch.
+
+After ESLAM is trained, run the following command for visualization.
 
 ```bash
 python visualizer.py configs/Replica/room0.yaml --output output/Replica/room0 --save_rendering
 ```
-The result of the visualization will be saved at `output/Replica/room0/vis.mp4`. The green trajectory indicates the ground truth trajectory, and the red is trajectory of ESLAM.
-Note: `mesh_freq:40` means extracting a mesh every 40 input frames. Since extracting a mesh with a high resolution takes some time, for faster running of ESLAM for visualization set `meshing resolution` in [configs/Replica/replica.yaml](configs/Replica/replica.yaml) to a higher value. For example, 5 cm.
+The result of the visualization will be saved at `output/Replica/room0/vis.mp4`. The green trajectory indicates the ground truth trajectory, and the red one is the trajectory of ESLAM.
+
+Note: `mesh_freq:40` means extracting a mesh every 40 input frames. Since extracting a mesh with a high resolution takes some time, for faster running of ESLAM for visualization set `meshing resolution` in [configs/Replica/replica.yaml](configs/Replica/replica.yaml) to a higher value before running ESLAM (*e.g.*, 5 cm).
 
 ### Visualizer Command line arguments
 - `--output $OUTPUT_FOLDER` output folder (overwrite the output folder in the config file)  

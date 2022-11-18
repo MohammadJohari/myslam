@@ -110,7 +110,6 @@ def calc_3d_metric(rec_meshfile, gt_meshfile, align=True):
     completion_ratio_rec *= 100  # convert to %
     print('accuracy: ', accuracy_rec)
     print('completion: ', completion_rec)
-    print('Ave. Distance: ', 0.5 * (accuracy_rec + completion_rec))
     print('completion ratio: ', completion_ratio_rec)
 
 
