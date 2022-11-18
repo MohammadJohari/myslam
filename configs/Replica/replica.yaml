@@ -5,10 +5,10 @@ tracking:
   seperate_LR: False
   lr: 0.001
   pixels: 2000
-  iters: 24
+  iters: 8
 mapping:
   pixels: 4000
-  iters: 45
+  iters: 15
 cam:
   H: 680
   W: 1200

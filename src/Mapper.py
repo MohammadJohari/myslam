@@ -170,7 +170,7 @@ class Mapper(object):
 
         return selected_keyframes
 
-    def optimize_map(self, num_joint_iters, lr_factor, idx, cur_gt_color, cur_gt_depth, gt_cur_c2w, keyframe_dict, keyframe_list, cur_c2w, wandb_q):
+    def optimize_map(self, num_joint_iters, lr_factor, idx, cur_gt_color, cur_gt_depth, gt_cur_c2w, keyframe_dict, keyframe_list, cur_c2w):
         """
         Mapping iterations. Sample pixels from selected keyframes,
         then optimize scene representation and camera poses(if local BA enables).
@@ -288,7 +288,7 @@ class Mapper(object):
 
             if (not (idx == 0 and self.no_vis_on_first_frame)):
                 self.visualizer.vis(
-                    idx, joint_iter, cur_gt_depth, cur_gt_color, cur_c2w, all_planes, self.decoders, wandb_q)
+                    idx, joint_iter, cur_gt_depth, cur_gt_color, cur_c2w, all_planes, self.decoders)
 
             if self.BA:
                 c2ws_ = torch.cat([c2ws[0:1], pose6d_to_matrix(pose6ds)], dim=0)
@@ -348,7 +348,7 @@ class Mapper(object):
         else:
             return None
 
-    def run(self, wandb_q):
+    def run(self):
         cfg = self.cfg
         all_planes = (self.planes_xy, self.planes_xz, self.planes_yz, self.c_planes_xy, self.c_planes_xz, self.c_planes_yz)
         idx, gt_color, gt_depth, gt_c2w = self.frame_reader[0]
@@ -397,7 +397,7 @@ class Mapper(object):
                 self.BA = (len(self.keyframe_list) > 4) and cfg['mapping']['BA']
 
                 _ = self.optimize_map(num_joint_iters, lr_factor, idx, gt_color, gt_depth,
-                                      gt_c2w, self.keyframe_dict, self.keyframe_list, cur_c2w=cur_c2w, wandb_q=wandb_q)
+                                      gt_c2w, self.keyframe_dict, self.keyframe_list, cur_c2w=cur_c2w)
 
                 if self.BA:
                     cur_c2w = _

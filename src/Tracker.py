@@ -20,8 +20,6 @@ from src.common import (matrix_to_pose6d, pose6d_to_matrix, get_samples)
 from src.utils.datasets import get_dataset
 from src.utils.Visualizer import Visualizer
 
-import wandb
-
 class Tracker(object):
     def __init__(self, cfg, args, slam
                  ):
@@ -199,7 +197,7 @@ class Tracker(object):
 
             self.prev_mapping_idx = self.mapping_idx[0].clone()
 
-    def run(self, wandb_q):
+    def run(self):
         device = self.device
         all_planes = (self.planes_xy, self.planes_xz, self.planes_yz, self.c_planes_xy, self.c_planes_xz, self.c_planes_yz)
 
@@ -207,10 +205,6 @@ class Tracker(object):
             pbar = self.frame_loader
         else:
             pbar = tqdm(self.frame_loader, smoothing=0.05)
-
-        wandb_dir = self.cfg['data']['output']
-        wandb_name = wandb_dir.split('/')[-1]
-        # wandb.init(config=self.cfg, project='slam', name=wandb_name, dir=wandb_dir)
 
         for idx, gt_color, gt_depth, gt_c2w in pbar:
             gt_color, gt_depth, gt_c2w = gt_color.to(device, non_blocking=True), gt_depth.to(device, non_blocking=True), gt_c2w.to(device, non_blocking=True)
@@ -237,7 +231,7 @@ class Tracker(object):
                 c2w = gt_c2w
                 if not self.no_vis_on_first_frame:
                     self.visualizer.vis(
-                        idx, 0, gt_depth, gt_color, c2w.squeeze(), all_planes, self.decoders, wandb_q)
+                        idx, 0, gt_depth, gt_color, c2w.squeeze(), all_planes, self.decoders)
 
             else:
                 # gt_pose6d = matrix_to_pose6d(gt_c2w)
@@ -270,7 +264,7 @@ class Tracker(object):
                     if self.seperate_LR:
                         pose6d = torch.cat([quad, T], -1)
 
-                    self.visualizer.vis(idx, cam_iter, gt_depth, gt_color, pose6d, all_planes, self.decoders, wandb_q)
+                    self.visualizer.vis(idx, cam_iter, gt_depth, gt_color, pose6d, all_planes, self.decoders)
 
                     loss = self.optimize_cam_in_batch(pose6d, gt_color, gt_depth, self.tracking_pixels, optimizer_camera)
                     if loss < current_min_loss:
@@ -287,10 +281,5 @@ class Tracker(object):
             if self.verbose:
                 print("---Tracking Time: %s seconds ---" % (time.time() - start_time))
 
-            while not wandb_q.empty():
-                wandb_val, wandb_idx = wandb_q.get()
-                # wandb.log(wandb_val, wandb_idx)
-
             if self.low_gpu_mem:
                 torch.cuda.empty_cache()
-        # wandb.finish()

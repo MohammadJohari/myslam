@@ -202,7 +202,7 @@ class ESLAM():
         self.shared_c_planes_xz = c_planes_xz
         self.shared_c_planes_yz = c_planes_yz
 
-    def tracking(self, rank, wandb_q):
+    def tracking(self, rank):
         """
         Tracking Thread.
 
@@ -216,9 +216,9 @@ class ESLAM():
                 break
             time.sleep(1)
 
-        self.tracker.run(wandb_q)
+        self.tracker.run()
 
-    def mapping(self, rank, wandb_q):
+    def mapping(self, rank):
         """
         Mapping Thread.
 
@@ -226,7 +226,7 @@ class ESLAM():
             rank (int): Thread ID.
         """
 
-        self.mapper.run(wandb_q)
+        self.mapper.run()
 
     def run(self):
         """
@@ -234,12 +234,11 @@ class ESLAM():
         """
 
         processes = []
-        wandb_q = mp.Queue()
         for rank in range(0, 2):
             if rank == 0:
-                p = mp.Process(target=self.tracking, args=(rank, wandb_q, ))
+                p = mp.Process(target=self.tracking, args=(rank, ))
             elif rank == 1:
-                p = mp.Process(target=self.mapping, args=(rank, wandb_q, ))
+                p = mp.Process(target=self.mapping, args=(rank, ))
             p.start()
             processes.append(p)
         for p in processes:

@@ -29,7 +29,7 @@ class Visualizer(object):
         self.truncation = truncation
         os.makedirs(f'{vis_dir}', exist_ok=True)
 
-    def vis(self, idx, iter, gt_depth, gt_color, c2w_or_camera_tensor, all_planes, decoders, wandb_q):
+    def vis(self, idx, iter, gt_depth, gt_color, c2w_or_camera_tensor, all_planes, decoders):
         """
         Visualization of depth, color images and save to file.
 

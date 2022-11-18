@@ -1,5 +1,5 @@
 scale: 1
-verbose: True
+verbose: False
 low_gpu_mem: False
 planes_res:
   coarse: 0.24
