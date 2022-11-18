@@ -106,12 +106,12 @@ def draw_trajectory(queue, output, init_pose, cam_scale,
                     color = (0.0, 1.0, 0.0) if is_gt else (1.0, .0, .0)
 
                     if is_gt:
-                        # pts = gt_c2w_list[1:i, :3, 3]
-                        pts = np.random.uniform(-0.005, 0.005, size=[20, i - 1, 3]) + gt_c2w_list[0:i, :3, 3]
+                        pts = gt_c2w_list[:i, :3, 3]
+                        # pts = np.random.uniform(-0.005, 0.005, size=[20, i, 3]) + gt_c2w_list[:i, :3, 3]
                         pts = pts[np.isfinite(pts).all(-1)]
                     else:
-                        # pts = estimate_c2w_list[1:i, :3, 3]
-                        pts = np.random.uniform(-0.005, 0.005, size=[20, i - 1, 3]) + estimate_c2w_list[0:i, :3, 3]
+                        pts = estimate_c2w_list[:i, :3, 3]
+                        # pts = np.random.uniform(-0.005, 0.005, size=[20, i, 3]) + estimate_c2w_list[:i, :3, 3]
                     pts = pts.reshape(-1, 3)
 
                     traj_actor = o3d.geometry.PointCloud(

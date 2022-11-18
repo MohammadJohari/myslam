@@ -60,7 +60,6 @@ if __name__ == '__main__':
     estimate_c2w_list = estimate_c2w_list.cpu().numpy()
     gt_c2w_list = gt_c2w_list.cpu().numpy()
 
-
     # ## Setting view point
     meshfile = f'{output}/mesh/final_mesh_eval_rec.ply'
     if os.path.isfile(meshfile):
