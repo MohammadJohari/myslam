@@ -29,7 +29,8 @@ class Decoders(nn.Module):
         self.output_linear = nn.Linear(hidden_size, 1)
         self.c_output_linear = nn.Linear(hidden_size, 3)
 
-        self.sharpness = nn.Parameter(10 * torch.ones(1))
+        # self.sharpness = nn.Parameter(10 * torch.ones(1))
+        self.sharpness = 10
 
     def sample_plane_feature(self, p_nor, planes_xy, planes_xz, planes_yz, act=True):
         vgrid = p_nor[None, :, None]

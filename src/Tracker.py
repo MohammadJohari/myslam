@@ -252,7 +252,8 @@ class Tracker(object):
                     cam_para_list_T = [T]
                     cam_para_list_quad = [quad]
                     optimizer_camera = torch.optim.Adam([{'params': cam_para_list_T, 'lr': self.cam_lr},
-                                                         {'params': cam_para_list_quad, 'lr': self.cam_lr * 5}])
+                                                         # {'params': cam_para_list_quad, 'lr': self.cam_lr * 5}])
+                                                         {'params': cam_para_list_quad, 'lr': self.cam_lr * 0.2}])
                 else:
                     pose6d = Variable(pose6d, requires_grad=True)
                     cam_para_list = [pose6d]

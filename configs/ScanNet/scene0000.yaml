@@ -3,5 +3,7 @@ mapping:
   bound: [[-2.0,11.0],[-2.0,11.5],[-2.0,5.5]]
   marching_cubes_bound: [[-2.0,11.0],[-2.0,11.5],[-2.0,5.5]]
 data:
-  input_folder: Datasets/scannet/scans/scene0000_00
-  output: output/scannet/scans/scene0000_00
+#  input_folder: Datasets/scannet/scans/scene0000_00
+  input_folder: /idiap/temp/mjohari/Datasets/scannet/scans/scene0000_00
+#  output: output/scannet/scans/scene0000_00
+  output: /idiap/temp/mjohari/outputs/slam/scannet/s0_temp

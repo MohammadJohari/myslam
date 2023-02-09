@@ -4,3 +4,5 @@ output
 .idea
 Datasets
 qsub*
+configs/Apartment*
+configs/TUM*

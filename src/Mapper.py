@@ -68,6 +68,7 @@ class Mapper(object):
         self.mapping_pixels = cfg['mapping']['pixels']
         self.num_joint_iters = cfg['mapping']['iters']
         self.every_frame = cfg['mapping']['every_frame']
+        self.color_refine = cfg['mapping']['color_refine']
         self.w_color_loss = cfg['mapping']['w_color_loss']
         self.keyframe_every = cfg['mapping']['keyframe_every']
         self.mapping_window_size = cfg['mapping']['mapping_window_size']
@@ -92,6 +93,12 @@ class Mapper(object):
                                      truncation=self.truncation, verbose=self.verbose, device=self.device)
         self.H, self.W, self.fx, self.fy, self.cx, self.cy = slam.H, slam.W, slam.fx, slam.fy, slam.cx, slam.cy
 
+        # if self.low_gpu_mem:
+        #     self.keyframe_device = 'cpu'
+        # else:
+        #     self.keyframe_device = self.device
+        self.keyframe_device = 'cpu'
+        # self.keyframe_device = self.device
 
     def sdf_loss(self, sdf, z_vals, gt_depth):
         front_mask = torch.where(z_vals < (gt_depth[:, None] - self.truncation), torch.ones_like(z_vals), torch.zeros_like(z_vals)).bool()
@@ -199,7 +206,7 @@ class Mapper(object):
             optimize_frame = []
         else:
             if self.keyframe_selection_method == 'global':
-                num = self.mapping_window_size-3
+                num = self.mapping_window_size-1
                 optimize_frame = random_select(len(self.keyframe_dict)-2, num)
             elif self.keyframe_selection_method == 'overlap':
                 num = self.mapping_window_size-1
@@ -252,8 +259,8 @@ class Mapper(object):
         for frame in optimize_frame:
             # the oldest frame should be fixed to avoid drifting
             if frame != -1:
-                gt_depths.append(keyframe_dict[frame]['depth'])
-                gt_colors.append(keyframe_dict[frame]['color'])
+                gt_depths.append(keyframe_dict[frame]['depth'].to(device))
+                gt_colors.append(keyframe_dict[frame]['color'].to(device))
                 c2ws.append(keyframe_dict[frame]['est_c2w'])
                 gt_c2ws.append(keyframe_dict[frame]['gt_c2w'])
             else:
@@ -383,7 +390,18 @@ class Mapper(object):
             if not init:
                 lr_factor = cfg['mapping']['lr_factor']
                 num_joint_iters = cfg['mapping']['iters']
-                outer_joint_iters = 1
+
+                ## Simple Code
+                # outer_joint_iters = 1
+
+                # here provides a color refinement postprocess
+                if idx == self.n_img-1 and self.color_refine:
+                    outer_joint_iters = 500
+                    self.mapping_window_size *= 2
+                    # num_joint_iters *= 5
+                    self.keyframe_selection_method = 'global'
+                else:
+                    outer_joint_iters = 1
 
             else:
                 outer_joint_iters = 1
@@ -408,8 +426,8 @@ class Mapper(object):
                     if (idx % self.keyframe_every == 0 or (idx == self.n_img-2)) \
                             and (idx not in self.keyframe_list):
                         self.keyframe_list.append(idx)
-                        self.keyframe_dict.append({'gt_c2w': gt_c2w, 'idx': idx, 'color': gt_color,
-                                                   'depth': gt_depth, 'est_c2w': cur_c2w.clone()})
+                        self.keyframe_dict.append({'gt_c2w': gt_c2w, 'idx': idx, 'color': gt_color.to(self.keyframe_device),
+                                                   'depth': gt_depth.to(self.keyframe_device), 'est_c2w': cur_c2w.clone()})
 
                         if self.rough_key_c2ws is None:
                             self.rough_key_c2ws = cur_c2w.unsqueeze(0).clone()
