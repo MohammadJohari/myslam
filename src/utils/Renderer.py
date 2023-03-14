@@ -107,10 +107,23 @@ class Renderer(object):
         rendered_rgb = torch.sum(weights[..., None] * raw[..., :3], -2)
         rendered_depth = torch.sum(weights * z_vals, -1)
 
-        return rendered_depth, rendered_rgb, raw[..., -1], z_vals
+        return rendered_depth, rendered_rgb, raw[..., -1], z_vals, alpha
 
     def sdf2alpha(self, sdf, sharpness=10):
-        return 1. - torch.exp(-sharpness * torch.sigmoid(-sdf * sharpness))
+        sdf_plus = torch.nn.functional.softplus(-sdf, beta=sharpness)
+        alpha = 1. - torch.exp(-sharpness * sdf_plus)
+
+        return alpha
+
+    # def sdf2alpha(self, sdf, sharpness=10):
+    #     # sdf_max = torch.clamp(sdf.detach(), min=-1, max=-1e-9).abs().max(dim=1)[0]
+    #     # sdf_norm = sdf / sdf_max[:, None]
+    #
+    #     alpha = 1. - torch.exp(-sharpness * torch.sigmoid(-sdf * sharpness))
+    #     # alpha_max = alpha.max(dim=1)[0].detach()
+    #     # alpha = alpha / alpha_max[:, None]
+    #
+    #     return alpha
         # return 1. - torch.exp(- 20 * torch.sigmoid(-sdf * 10))
 
     def render_img(self, all_planes, decoders, c2w, truncation, device, gt_depth=None):
@@ -156,7 +169,7 @@ class Renderer(object):
                                                 rays_o_batch, device, truncation,
                                                 gt_depth=gt_depth_batch)
 
-                depth, color, _, _ = ret
+                depth, color, _, _, _ = ret
                 depth_list.append(depth.double())
                 color_list.append(color)
 

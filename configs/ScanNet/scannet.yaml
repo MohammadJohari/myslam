@@ -9,7 +9,7 @@ tracking:
 mapping:
   pixels: 4000
   iters: 30
-cam: 
+cam:
   H: 480 
   W: 640
   fx: 577.590698

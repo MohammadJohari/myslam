@@ -29,7 +29,10 @@ class Decoders(nn.Module):
         self.output_linear = nn.Linear(hidden_size, 1)
         self.c_output_linear = nn.Linear(hidden_size, 3)
 
-        self.sharpness = nn.Parameter(10 * torch.ones(1))
+        # self.sharpness = nn.Parameter(10 * torch.ones(1))
+        self.sharpness = 10
+
+        self.drop_mode = False
 
     def sample_plane_feature(self, p_nor, planes_xy, planes_xz, planes_yz, act=True):
         vgrid = p_nor[None, :, None]
@@ -52,6 +55,10 @@ class Decoders(nn.Module):
         planes_xy, planes_xz, planes_yz, c_planes_xy, c_planes_xz, c_planes_yz = all_planes
         feat = self.sample_plane_feature(p_nor, planes_xy, planes_xz, planes_yz, act=True)
         h = feat
+
+        if self.drop_mode:
+            h = self.drop(h)
+
         for i, l in enumerate(self.linears):
             h = self.linears[i](h)
             h = F.relu(h, inplace=True)
@@ -63,6 +70,10 @@ class Decoders(nn.Module):
         planes_xy, planes_xz, planes_yz, c_planes_xy, c_planes_xz, c_planes_yz = all_planes
         c_feat = self.sample_plane_feature(p_nor, c_planes_xy, c_planes_xz, c_planes_yz, act=True)
         h = c_feat
+
+        if self.drop_mode:
+            h = self.drop(h)
+
         for i, l in enumerate(self.c_linears):
             h = self.c_linears[i](h)
             h = F.relu(h, inplace=True)
@@ -82,3 +93,18 @@ class Decoders(nn.Module):
         raw = raw.reshape(*p_shape[:-1], -1)
 
         return raw
+
+    def set_drop_mode(self, drop_mode):
+        self.drop_mode = drop_mode
+
+    def drop(self, h):
+        dropped = h
+        # mask = (torch.rand(h.shape, device=h.device) > 0.6).float()
+        # dropped = mask * torch.cat([2 * h[:, :self.c_dim], 0 * h[:, self.c_dim:]], dim=-1) + (1 - mask) * h
+
+        # if torch.rand([1]) > 0.6:
+        #     dropped = torch.cat([2 * h[:,:self.c_dim], 0 * h[:,self.c_dim:]], dim=-1)
+        # else:
+        #     dropped = h
+
+        return dropped

@@ -148,7 +148,7 @@ class Tracker(object):
                                              self.decoders, batch_rays_d,
                                              batch_rays_o, self.device, self.truncation,
                                              gt_depth=batch_gt_depth)
-        depth, color, sdf, z_vals = ret
+        depth, color, sdf, z_vals, _ = ret
 
         depth_diff = (batch_gt_depth - depth).abs()
 
@@ -164,7 +164,8 @@ class Tracker(object):
             loss += self.w_color_loss * color_loss
 
         ### Depth loss
-        loss = loss + 1 * torch.square(batch_gt_depth[good_mask] - depth[good_mask]).mean()
+        # loss = loss + 1 * torch.square(batch_gt_depth[good_mask] - depth[good_mask]).mean()
+        loss = loss + 10 * torch.square(batch_gt_depth[good_mask] - depth[good_mask]).mean()
 
         optimizer.zero_grad()
         loss.backward()
