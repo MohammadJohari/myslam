@@ -1,9 +1,24 @@
-# *****************************************************************
-# This source code is only provided for the reviewing purpose of
-# CVPR 2023. The source files should not be kept or used in any
-# commercial or research products. Please delete all files after
-# the reviewing period.
-# *****************************************************************
+# ESLAM is a A NeRF-based SLAM system.
+# It utilizes Neural Radiance Fields (NeRF) to perform Simultaneous
+# Localization and Mapping (SLAM) in real-time. This system uses neural
+# rendering techniques to create a 3D map of an environment from a
+# sequence of images and estimates the camera pose simultaneously.
+#
+# Apache License 2.0
+#
+# Copyright (c) 2023 ams-OSRAM AG
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+
+#     http://www.apache.org/licenses/LICENSE-2.0
+
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
 
 import os
 import time
@@ -34,8 +49,8 @@ class ESLAM():
         self.cfg = cfg
         self.args = args
 
-        self.low_gpu_mem = cfg['low_gpu_mem']
         self.verbose = cfg['verbose']
+        self.device = cfg['device']
         self.dataset = cfg['dataset']
         self.truncation = cfg['model']['truncation']
 
@@ -67,7 +82,7 @@ class ESLAM():
 
         self.frame_reader = get_dataset(cfg, args, self.scale)
         self.n_img = len(self.frame_reader)
-        self.estimate_c2w_list = torch.zeros((self.n_img, 4, 4), device=self.cfg['mapping']['device'])
+        self.estimate_c2w_list = torch.zeros((self.n_img, 4, 4), device=self.device)
         self.estimate_c2w_list.share_memory_()
 
         self.gt_c2w_list = torch.zeros((self.n_img, 4, 4))
@@ -84,18 +99,17 @@ class ESLAM():
 
         for shared_planes in [self.shared_planes_xy, self.shared_planes_xz, self.shared_planes_yz]:
             for i, plane in enumerate(shared_planes):
-                plane = plane.to(self.cfg['mapping']['device'])
+                plane = plane.to(self.device)
                 plane.share_memory_()
                 shared_planes[i] = plane
 
         for shared_c_planes in [self.shared_c_planes_xy, self.shared_c_planes_xz, self.shared_c_planes_yz]:
             for i, plane in enumerate(shared_c_planes):
-                plane = plane.to(self.cfg['mapping']['device'])
+                plane = plane.to(self.device)
                 plane.share_memory_()
                 shared_c_planes[i] = plane
 
-        self.shared_decoders = self.shared_decoders.to(
-            self.cfg['mapping']['device'])
+        self.shared_decoders = self.shared_decoders.to(self.device)
         self.shared_decoders.share_memory()
 
         self.renderer = Renderer(cfg, args, self)

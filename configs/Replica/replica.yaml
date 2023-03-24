@@ -1,6 +1,7 @@
 dataset: 'replica'
 meshing:
   resolution: 0.01 #cm # Increase this number to speed up meshing algorithm
+  eval_rec: True
 tracking:
   lr_T: 0.001
   lr_R: 0.001
@@ -19,6 +20,6 @@ cam:
   png_depth_scale: 6553.5 #for depth image in png format
   crop_edge: 0
 rendering:
-  N_samples: 32
-  N_surface: 8
+  n_stratified: 32
+  n_importance: 8
   learnable_beta: True

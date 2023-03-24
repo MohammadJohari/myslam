@@ -1,6 +1,7 @@
 dataset: 'scannet'
 meshing:
   resolution: 0.02 #cm # Increase this number to speed up meshing algorithm
+  eval_rec: False
 tracking:
   lr_T: 0.0005
   lr_R: 0.0025
@@ -19,6 +20,6 @@ cam:
   png_depth_scale: 1000. #for depth image in png format
   crop_edge: 10
 rendering:
-  N_samples: 48
-  N_surface: 8
+  n_stratified: 48
+  n_importance: 8
   learnable_beta: True

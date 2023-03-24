@@ -50,7 +50,6 @@ class Tracker(object):
         self.verbose = slam.verbose
         self.renderer = slam.renderer
         self.gt_c2w_list = slam.gt_c2w_list
-        self.low_gpu_mem = slam.low_gpu_mem
         self.mapping_idx = slam.mapping_idx
         self.mapping_cnt = slam.mapping_cnt
         self.shared_decoders = slam.shared_decoders
@@ -67,14 +66,13 @@ class Tracker(object):
 
         self.cam_lr_T = cfg['tracking']['lr_T']
         self.cam_lr_R = cfg['tracking']['lr_R']
-        self.device = cfg['tracking']['device']
+        self.device = cfg['device']
         self.num_cam_iters = cfg['tracking']['iters']
         self.gt_camera = cfg['tracking']['gt_camera']
         self.tracking_pixels = cfg['tracking']['pixels']
         self.w_color_loss = cfg['tracking']['w_color_loss']
         self.ignore_edge_W = cfg['tracking']['ignore_edge_W']
         self.ignore_edge_H = cfg['tracking']['ignore_edge_H']
-        self.use_color_in_tracking = cfg['tracking']['use_color_in_tracking']
         self.const_speed_assumption = cfg['tracking']['const_speed_assumption']
 
         self.every_frame = cfg['mapping']['every_frame']
@@ -174,9 +172,8 @@ class Tracker(object):
 
         loss = self.sdf_loss(sdf[good_mask], z_vals[good_mask], batch_gt_depth[good_mask])
 
-        if self.use_color_in_tracking:
-            color_loss = torch.square(batch_gt_color - color)[good_mask].mean()
-            loss += self.w_color_loss * color_loss
+        color_loss = torch.square(batch_gt_color - color)[good_mask].mean()
+        loss += self.w_color_loss * color_loss
 
         ### Depth loss
         loss = loss + 1 * torch.square(batch_gt_depth[good_mask] - depth[good_mask]).mean()
@@ -294,6 +291,3 @@ class Tracker(object):
 
             if self.verbose:
                 print("---Tracking Time: %s seconds ---" % (time.time() - start_time))
-
-            if self.low_gpu_mem:
-                torch.cuda.empty_cache()

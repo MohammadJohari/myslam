@@ -56,7 +56,6 @@ class Mapper(object):
         self.output = slam.output
         self.verbose = slam.verbose
         self.renderer = slam.renderer
-        self.low_gpu_mem = slam.low_gpu_mem
         self.mapping_idx = slam.mapping_idx
         self.mapping_cnt = slam.mapping_cnt
         self.decoders = slam.shared_decoders
@@ -74,7 +73,8 @@ class Mapper(object):
 
         self.scale = cfg['scale']
 
-        self.device = cfg['mapping']['device']
+        self.device = cfg['device']
+        self.keyframe_device = cfg['keyframe_device']
         self.eval_rec = cfg['meshing']['eval_rec']
         self.BA = False  # Even if BA is enabled, it starts only when there are at least 4 keyframes
         self.BA_cam_lr = cfg['mapping']['BA_cam_lr']
@@ -90,10 +90,6 @@ class Mapper(object):
         self.no_log_on_first_frame = cfg['mapping']['no_log_on_first_frame']
         self.no_mesh_on_first_frame = cfg['mapping']['no_mesh_on_first_frame']
         self.keyframe_selection_method = cfg['mapping']['keyframe_selection_method']
-        self.save_selected_keyframes_info = cfg['mapping']['save_selected_keyframes_info']
-        if self.save_selected_keyframes_info:
-            self.selected_keyframes = {}
-
 
         self.keyframe_dict = []
         self.keyframe_list = []
@@ -106,13 +102,6 @@ class Mapper(object):
                                      vis_dir=os.path.join(self.output, 'mapping_vis'), renderer=self.renderer,
                                      truncation=self.truncation, verbose=self.verbose, device=self.device)
         self.H, self.W, self.fx, self.fy, self.cx, self.cy = slam.H, slam.W, slam.fx, slam.fy, slam.cx, slam.cy
-
-        # if self.low_gpu_mem:
-        #     self.keyframe_device = 'cpu'
-        # else:
-        #     self.keyframe_device = self.device
-        self.keyframe_device = 'cpu'
-        # self.keyframe_device = self.device
 
     def sdf_loss(self, sdf, z_vals, gt_depth):
         front_mask = torch.where(z_vals < (gt_depth[:, None] - self.truncation), torch.ones_like(z_vals), torch.zeros_like(z_vals)).bool()
@@ -231,21 +220,6 @@ class Mapper(object):
             optimize_frame = optimize_frame + [len(keyframe_list)-1] + [len(keyframe_list)-2]
             optimize_frame = sorted(optimize_frame)
         optimize_frame += [-1]
-
-        if self.save_selected_keyframes_info:
-            keyframes_info = []
-            for id, frame in enumerate(optimize_frame):
-                if frame != -1:
-                    frame_idx = keyframe_list[frame]
-                    tmp_gt_c2w = keyframe_dict[frame]['gt_c2w']
-                    tmp_est_c2w = keyframe_dict[frame]['est_c2w']
-                else:
-                    frame_idx = idx
-                    tmp_gt_c2w = gt_cur_c2w
-                    tmp_est_c2w = cur_c2w
-                keyframes_info.append(
-                    {'idx': frame_idx, 'gt_c2w': tmp_gt_c2w, 'est_c2w': tmp_est_c2w})
-            self.selected_keyframes[idx] = keyframes_info
 
         pixs_per_image = self.mapping_pixels//len(optimize_frame)
 
@@ -431,9 +405,6 @@ class Mapper(object):
             if self.verbose:
                 print("---Mapping Time: %s seconds ---" % (time.time() - start_time))
 
-            if self.low_gpu_mem:
-                torch.cuda.empty_cache()
-
             init = False
             # mapping of first frame is done, can begin tracking
             self.mapping_first_frame[0] = 1
@@ -441,8 +412,7 @@ class Mapper(object):
             if ((not (idx == 0 and self.no_log_on_first_frame)) and idx % self.ckpt_freq == 0) \
                     or idx == self.n_img-1:
                 self.logger.log(idx, self.keyframe_dict, self.keyframe_list,
-                                selected_keyframes=self.selected_keyframes
-                                if self.save_selected_keyframes_info else None)
+                                selected_keyframes=None)
 
             self.mapping_idx[0] = idx
             self.mapping_cnt[0] += 1
@@ -450,13 +420,16 @@ class Mapper(object):
             if (idx % self.mesh_freq == 0) and (not (idx == 0 and self.no_mesh_on_first_frame)):
                 mesh_out_file = f'{self.output}/mesh/{idx:05d}_mesh.ply'
                 self.mesher.get_mesh(mesh_out_file, all_planes, self.decoders, self.keyframe_dict, self.device)
+                cull_mesh(mesh_out_file, self.cfg, self.args, self.device, estimate_c2w_list=self.estimate_c2w_list[:idx+1])
 
             if idx == self.n_img-1:
                 if self.eval_rec:
                     mesh_out_file = f'{self.output}/mesh/final_mesh_eval_rec.ply'
-                    self.mesher.get_mesh(mesh_out_file, all_planes, self.decoders, self.keyframe_dict, self.device)
+                else:
+                    mesh_out_file = f'{self.output}/mesh/final_mesh.ply'
 
-                    cull_mesh(mesh_out_file, self.cfg, self.args, self.device, estimate_c2w_list=self.estimate_c2w_list)
+                self.mesher.get_mesh(mesh_out_file, all_planes, self.decoders, self.keyframe_dict, self.device)
+                cull_mesh(mesh_out_file, self.cfg, self.args, self.device, estimate_c2w_list=self.estimate_c2w_list)
 
                 break
 

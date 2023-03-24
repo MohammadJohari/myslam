@@ -6,13 +6,12 @@ class Renderer(object):
         self.ray_batch_size = ray_batch_size
         self.points_batch_size = points_batch_size
 
-        self.lindisp = cfg['rendering']['lindisp']
         self.perturb = cfg['rendering']['perturb']
-        self.N_samples = cfg['rendering']['N_samples']
-        self.N_surface = cfg['rendering']['N_surface']
+        self.n_stratified = cfg['rendering']['n_stratified']
+        self.n_importance = cfg['rendering']['n_importance']
 
         self.scale = cfg['scale']
-        self.bound = slam.bound.to(cfg['mapping']['device'], non_blocking=True)
+        self.bound = slam.bound.to(slam.device, non_blocking=True)
 
         self.H, self.W, self.fx, self.fy, self.cx, self.cy = slam.H, slam.W, slam.fx, slam.fy, slam.cx, slam.cy
 
@@ -43,27 +42,28 @@ class Renderer(object):
             uncertainty (tensor): rendered uncertainty.
             color (tensor): rendered color.
         """
-        N_samples = self.N_samples
-        N_surface = self.N_surface
-        N_rays = rays_o.shape[0]
-        z_vals = torch.empty([N_rays, N_samples + N_surface], device=device)
+        n_stratified = self.n_stratified
+        n_importance = self.n_importance
+        n_rays = rays_o.shape[0]
+
+        z_vals = torch.empty([n_rays, n_stratified + n_importance], device=device)
         near = 0.0
-        t_vals_uni = torch.linspace(0., 1., steps=N_samples, device=device)
-        t_vals_surface = torch.linspace(0., 1., steps=N_surface, device=device)
+        t_vals_uni = torch.linspace(0., 1., steps=n_stratified, device=device)
+        t_vals_surface = torch.linspace(0., 1., steps=n_importance, device=device)
 
         ### pixels with gt depth:
         gt_depth = gt_depth.reshape(-1, 1)
         gt_mask = (gt_depth > 0).squeeze()
         gt_nonezero = gt_depth[gt_mask]
 
-        gt_depth_surface = gt_nonezero.expand(-1, N_surface)
+        gt_depth_surface = gt_nonezero.expand(-1, n_importance)
         z_vals_surface = gt_depth_surface - (1.5 * truncation)  + (3 * truncation * t_vals_surface)
 
-        gt_depth_free = gt_nonezero.expand(-1, N_samples)
+        gt_depth_free = gt_nonezero.expand(-1, n_stratified)
         z_vals_free = near + 1.2 * gt_depth_free * t_vals_uni
 
         z_vals_nonzero, _ = torch.sort(torch.cat([z_vals_free, z_vals_surface], dim=-1), dim=-1)
-        if self.perturb > 0.:
+        if self.perturb:
             z_vals_nonzero = self.perturbation(z_vals_nonzero)
         z_vals[gt_mask] = z_vals_nonzero
 
@@ -80,9 +80,9 @@ class Renderer(object):
                 far_bb += 0.01
 
                 z_vals_uni = near * (1. - t_vals_uni) + far_bb * t_vals_uni
-                if self.perturb > 0.:
+                if self.perturb:
                     z_vals_uni = self.perturbation(z_vals_uni)
-                pts_uni = rays_o_uni.unsqueeze(1) + rays_d_uni.unsqueeze(1) * z_vals_uni.unsqueeze(-1)  # [N_rays, N_samples, 3]
+                pts_uni = rays_o_uni.unsqueeze(1) + rays_d_uni.unsqueeze(1) * z_vals_uni.unsqueeze(-1)  # [n_rays, n_stratified, 3]
 
                 pts_uni_nor = normalize_3d_coordinate(pts_uni.clone(), self.bound)
                 sdf_uni = decoders.get_raw_sdf(pts_uni_nor, all_planes)
@@ -92,12 +92,12 @@ class Renderer(object):
                                                         , (1. - alpha_uni + 1e-10)], -1), -1)[:, :-1]
 
                 z_vals_uni_mid = .5 * (z_vals_uni[..., 1:] + z_vals_uni[..., :-1])
-                z_samples_uni = sample_pdf(z_vals_uni_mid, weights_uni[..., 1:-1], N_surface, det=False, device=device)
+                z_samples_uni = sample_pdf(z_vals_uni_mid, weights_uni[..., 1:-1], n_importance, det=False, device=device)
                 z_vals_uni, ind = torch.sort(torch.cat([z_vals_uni, z_samples_uni], -1), -1)
                 z_vals[~gt_mask] = z_vals_uni
 
         pts = rays_o[..., None, :] + rays_d[..., None, :] * \
-              z_vals[..., :, None]  # [N_rays, N_samples+N_surface, 3]
+              z_vals[..., :, None]  # [n_rays, n_stratified+n_importance, 3]
 
         raw = decoders.get_raw(pts, all_planes)
         alpha = self.sdf2alpha(raw[..., -1], decoders.beta)

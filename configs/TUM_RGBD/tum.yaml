@@ -1,4 +1,7 @@
 dataset: 'tumrgbd'
+meshing:
+  resolution: 0.01 #cm # Increase this number to speed up meshing algorithm
+  eval_rec: False
 tracking:
   vis_freq: 500
   vis_inside_freq: 25
@@ -32,6 +35,6 @@ cam:  #NOTE: intrinsic is different per scene in TUM
   png_depth_scale: 5000.0
   crop_edge: 0
 rendering:
-  N_samples: 48
-  N_surface: 8
+  n_stratified: 48
+  n_importance: 8
   learnable_beta: False

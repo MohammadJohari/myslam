@@ -1,9 +1,24 @@
-# *****************************************************************
-# This source code is only provided for the reviewing purpose of
-# CVPR 2023. The source files should not be kept or used in any
-# commercial or research products. Please delete all files after
-# the reviewing period.
-# *****************************************************************
+# ESLAM is a A NeRF-based SLAM system.
+# It utilizes Neural Radiance Fields (NeRF) to perform Simultaneous
+# Localization and Mapping (SLAM) in real-time. This system uses neural
+# rendering techniques to create a 3D map of an environment from a
+# sequence of images and estimates the camera pose simultaneously.
+#
+# Apache License 2.0
+#
+# Copyright (c) 2023 ams-OSRAM AG
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+
+#     http://www.apache.org/licenses/LICENSE-2.0
+
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
 
 import argparse
 
@@ -23,15 +38,14 @@ def cull_mesh(mesh_file, cfg, args, device, estimate_c2w_list=None):
     frame_reader = get_dataset(cfg, args, 1, device=device)
 
     H, W, fx, fy, cx, cy = cfg['cam']['H'], cfg['cam']['W'], cfg['cam']['fx'], cfg['cam']['fy'], cfg['cam']['cx'], cfg['cam']['cy']
-    scale = cfg['cam']['png_depth_scale']
+    eval_rec = cfg['meshing']['eval_rec']
 
-    n_imgs = len(frame_reader)
+    if estimate_c2w_list is not None:
+        n_imgs = len(estimate_c2w_list)
+    else:
+        n_imgs = len(frame_reader)
 
     mesh = trimesh.load(mesh_file, process=False)
-    # vertices, faces = trimesh.remesh.subdivide_to_size(mesh.vertices, mesh.faces, max_edge=0.015, max_iter=10)
-    # mesh = trimesh.Trimesh(vertices, faces, process=False)
-    # mesh.remove_unreferenced_vertices()
-
     pc = mesh.vertices
 
     whole_mask = np.ones(pc.shape[0]).astype(np.bool)
@@ -67,9 +81,12 @@ def cull_mesh(mesh_file, cfg, args, device, estimate_c2w_list=None):
         depth_samples = F.grid_sample(depth[None, None], grid, padding_mode='zeros', align_corners=True).squeeze()
 
         edge = 0
-        eps = 0.06
-        # mask = (0 <= -z[:, 0, 0]) & (uv[:, 0] < W -edge) & (uv[:, 0] > edge) & (uv[:, 1] < H-edge) & (uv[:, 1] > edge)
-        mask = (depth_samples + eps >= -z[:, 0, 0]) & (0 <= -z[:, 0, 0]) & (uv[:, 0] < W - edge) & (uv[:, 0] > edge) & (uv[:, 1] < H - edge) & (uv[:, 1] > edge)
+        if eval_rec:
+            eps = 0.06
+            mask = (depth_samples + eps >= -z[:, 0, 0]) & (0 <= -z[:, 0, 0]) & (uv[:, 0] < W - edge) & (uv[:, 0] > edge) & (uv[:, 1] < H - edge) & (uv[:, 1] > edge)
+        else:
+            mask = (0 <= -z[:, 0, 0]) & (uv[:, 0] < W -edge) & (uv[:, 0] > edge) & (uv[:, 1] < H-edge) & (uv[:, 1] > edge)
+
         mask = mask.cpu().numpy()
 
         whole_mask &= ~mask
