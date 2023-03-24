@@ -1,9 +1,24 @@
-# *****************************************************************
-# This source code is only provided for the reviewing purpose of
-# CVPR 2023. The source files should not be kept or used in any
-# commercial or research products. Please delete all files after
-# the reviewing period.
-# *****************************************************************
+# ESLAM is a A NeRF-based SLAM system.
+# It utilizes Neural Radiance Fields (NeRF) to perform Simultaneous
+# Localization and Mapping (SLAM) in real-time. This system uses neural
+# rendering techniques to create a 3D map of an environment from a
+# sequence of images and estimates the camera pose simultaneously.
+#
+# Apache License 2.0
+#
+# Copyright (c) 2023 ams-OSRAM AG
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+
+#     http://www.apache.org/licenses/LICENSE-2.0
+
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
 
 import os
 import time
@@ -68,7 +83,6 @@ class Mapper(object):
         self.mapping_pixels = cfg['mapping']['pixels']
         self.num_joint_iters = cfg['mapping']['iters']
         self.every_frame = cfg['mapping']['every_frame']
-        self.color_refine = cfg['mapping']['color_refine']
         self.w_color_loss = cfg['mapping']['w_color_loss']
         self.keyframe_every = cfg['mapping']['keyframe_every']
         self.mapping_window_size = cfg['mapping']['mapping_window_size']
@@ -351,9 +365,7 @@ class Mapper(object):
                 else:
                     cur_c2w = optimized_c2ws[-1]
 
-            return cur_c2w
-        else:
-            return None
+        return cur_c2w
 
     def run(self):
         cfg = self.cfg
@@ -387,52 +399,34 @@ class Mapper(object):
 
             _, gt_color, gt_depth, gt_c2w = next(data_iter)
             gt_color, gt_depth, gt_c2w = gt_color.squeeze(0).to(self.device, non_blocking=True), gt_depth.squeeze(0).to(self.device, non_blocking=True), gt_c2w.squeeze(0).to(self.device, non_blocking=True)
+
+            cur_c2w = self.estimate_c2w_list[idx]
+
             if not init:
                 lr_factor = cfg['mapping']['lr_factor']
                 num_joint_iters = cfg['mapping']['iters']
-
-                ## Simple Code
-                # outer_joint_iters = 1
-
-                # here provides a color refinement postprocess
-                if idx == self.n_img-1 and self.color_refine:
-                    outer_joint_iters = 500
-                    self.mapping_window_size *= 2
-                    # num_joint_iters *= 5
-                    self.keyframe_selection_method = 'global'
-                else:
-                    outer_joint_iters = 1
-
             else:
-                outer_joint_iters = 1
                 lr_factor = cfg['mapping']['lr_first_factor']
                 num_joint_iters = cfg['mapping']['iters_first']
 
-            cur_c2w = self.estimate_c2w_list[idx]
-            num_joint_iters = num_joint_iters//outer_joint_iters
-            for outer_joint_iter in range(outer_joint_iters):
+            self.BA = (len(self.keyframe_list) > 4) and cfg['mapping']['BA']
 
-                self.BA = (len(self.keyframe_list) > 4) and cfg['mapping']['BA']
+            cur_c2w = self.optimize_map(num_joint_iters, lr_factor, idx, gt_color, gt_depth,
+                                  gt_c2w, self.keyframe_dict, self.keyframe_list, cur_c2w=cur_c2w)
 
-                _ = self.optimize_map(num_joint_iters, lr_factor, idx, gt_color, gt_depth,
-                                      gt_c2w, self.keyframe_dict, self.keyframe_list, cur_c2w=cur_c2w)
+            if self.BA:
+                self.estimate_c2w_list[idx] = cur_c2w
 
-                if self.BA:
-                    cur_c2w = _
-                    self.estimate_c2w_list[idx] = cur_c2w
+            # add new frame to keyframe set
+            if idx % self.keyframe_every == 0:
+                self.keyframe_list.append(idx)
+                self.keyframe_dict.append({'gt_c2w': gt_c2w, 'idx': idx, 'color': gt_color.to(self.keyframe_device),
+                                           'depth': gt_depth.to(self.keyframe_device), 'est_c2w': cur_c2w.clone()})
 
-                # add new frame to keyframe set
-                if outer_joint_iter == outer_joint_iters-1:
-                    if (idx % self.keyframe_every == 0 or (idx == self.n_img-2)) \
-                            and (idx not in self.keyframe_list):
-                        self.keyframe_list.append(idx)
-                        self.keyframe_dict.append({'gt_c2w': gt_c2w, 'idx': idx, 'color': gt_color.to(self.keyframe_device),
-                                                   'depth': gt_depth.to(self.keyframe_device), 'est_c2w': cur_c2w.clone()})
-
-                        if self.rough_key_c2ws is None:
-                            self.rough_key_c2ws = cur_c2w.unsqueeze(0).clone()
-                        else:
-                            self.rough_key_c2ws = torch.cat([self.rough_key_c2ws, cur_c2w.unsqueeze(0).clone()], dim=0)
+                if self.rough_key_c2ws is None:
+                    self.rough_key_c2ws = cur_c2w.unsqueeze(0).clone()
+                else:
+                    self.rough_key_c2ws = torch.cat([self.rough_key_c2ws, cur_c2w.unsqueeze(0).clone()], dim=0)
 
             if self.verbose:
                 print("---Mapping Time: %s seconds ---" % (time.time() - start_time))

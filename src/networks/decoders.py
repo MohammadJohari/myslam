@@ -11,7 +11,7 @@ import torch.nn.functional as F
 from src.common import normalize_3d_coordinate
 
 class Decoders(nn.Module):
-    def __init__(self, c_dim=32, hidden_size=16, truncation=0.08, n_blocks=2):
+    def __init__(self, c_dim=32, hidden_size=16, truncation=0.08, n_blocks=2, learnable_beta=True):
         super().__init__()
 
         self.c_dim = c_dim
@@ -29,8 +29,10 @@ class Decoders(nn.Module):
         self.output_linear = nn.Linear(hidden_size, 1)
         self.c_output_linear = nn.Linear(hidden_size, 3)
 
-        # self.sharpness = nn.Parameter(10 * torch.ones(1))
-        self.sharpness = 10
+        if learnable_beta:
+            self.beta = nn.Parameter(10 * torch.ones(1))
+        else:
+            self.beta = 10
 
     def sample_plane_feature(self, p_nor, planes_xy, planes_xz, planes_yz, act=True):
         vgrid = p_nor[None, :, None]

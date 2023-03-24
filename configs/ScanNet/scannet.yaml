@@ -2,8 +2,8 @@ dataset: 'scannet'
 meshing:
   resolution: 0.02 #cm # Increase this number to speed up meshing algorithm
 tracking:
-  seperate_LR: True
-  lr: 0.0005
+  lr_T: 0.0005
+  lr_R: 0.0025
   pixels: 2000
   iters: 30
 mapping:
@@ -21,3 +21,4 @@ cam:
 rendering:
   N_samples: 48
   N_surface: 8
+  learnable_beta: True

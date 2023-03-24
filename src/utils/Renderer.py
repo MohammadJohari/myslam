@@ -87,7 +87,7 @@ class Renderer(object):
                 pts_uni_nor = normalize_3d_coordinate(pts_uni.clone(), self.bound)
                 sdf_uni = decoders.get_raw_sdf(pts_uni_nor, all_planes)
                 sdf_uni = sdf_uni.reshape(*pts_uni.shape[0:2])
-                alpha_uni = self.sdf2alpha(sdf_uni, decoders.sharpness)
+                alpha_uni = self.sdf2alpha(sdf_uni, decoders.beta)
                 weights_uni = alpha_uni * torch.cumprod(torch.cat([torch.ones((alpha_uni.shape[0], 1), device=device)
                                                         , (1. - alpha_uni + 1e-10)], -1), -1)[:, :-1]
 
@@ -100,7 +100,7 @@ class Renderer(object):
               z_vals[..., :, None]  # [N_rays, N_samples+N_surface, 3]
 
         raw = decoders.get_raw(pts, all_planes)
-        alpha = self.sdf2alpha(raw[..., -1], decoders.sharpness)
+        alpha = self.sdf2alpha(raw[..., -1], decoders.beta)
         weights = alpha * torch.cumprod(torch.cat([torch.ones((alpha.shape[0], 1), device=device)
                                                 , (1. - alpha + 1e-10)], -1), -1)[:, :-1]
 
@@ -109,9 +109,8 @@ class Renderer(object):
 
         return rendered_depth, rendered_rgb, raw[..., -1], z_vals
 
-    def sdf2alpha(self, sdf, sharpness=10):
-        return 1. - torch.exp(-sharpness * torch.sigmoid(-sdf * sharpness))
-        # return 1. - torch.exp(- 20 * torch.sigmoid(-sdf * 10))
+    def sdf2alpha(self, sdf, beta=10):
+        return 1. - torch.exp(-beta * torch.sigmoid(-sdf * beta))
 
     def render_img(self, all_planes, decoders, c2w, truncation, device, gt_depth=None):
         """

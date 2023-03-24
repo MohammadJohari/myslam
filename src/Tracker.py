@@ -1,9 +1,24 @@
-# *****************************************************************
-# This source code is only provided for the reviewing purpose of
-# CVPR 2023. The source files should not be kept or used in any
-# commercial or research products. Please delete all files after
-# the reviewing period.
-# *****************************************************************
+# ESLAM is a A NeRF-based SLAM system.
+# It utilizes Neural Radiance Fields (NeRF) to perform Simultaneous
+# Localization and Mapping (SLAM) in real-time. This system uses neural
+# rendering techniques to create a 3D map of an environment from a
+# sequence of images and estimates the camera pose simultaneously.
+#
+# Apache License 2.0
+#
+# Copyright (c) 2023 ams-OSRAM AG
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+
+#     http://www.apache.org/licenses/LICENSE-2.0
+
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
 
 import copy
 import os
@@ -50,12 +65,12 @@ class Tracker(object):
         self.shared_c_planes_xz = slam.shared_c_planes_xz
         self.shared_c_planes_yz = slam.shared_c_planes_yz
 
-        self.cam_lr = cfg['tracking']['lr']
+        self.cam_lr_T = cfg['tracking']['lr_T']
+        self.cam_lr_R = cfg['tracking']['lr_R']
         self.device = cfg['tracking']['device']
         self.num_cam_iters = cfg['tracking']['iters']
         self.gt_camera = cfg['tracking']['gt_camera']
         self.tracking_pixels = cfg['tracking']['pixels']
-        self.seperate_LR = cfg['tracking']['seperate_LR']
         self.w_color_loss = cfg['tracking']['w_color_loss']
         self.ignore_edge_W = cfg['tracking']['ignore_edge_W']
         self.ignore_edge_H = cfg['tracking']['ignore_edge_H']
@@ -243,34 +258,32 @@ class Tracker(object):
                 else:
                     pose6d = matrix_to_pose6d(pre_c2w)
 
-                if self.seperate_LR:
-                    T = pose6d[:, -3:]
-                    quad = pose6d[:,:4]
-                    quad = Variable(quad, requires_grad=True)
-                    T = Variable(T, requires_grad=True)
-                    pose6d = torch.cat([quad, T], -1)
-                    cam_para_list_T = [T]
-                    cam_para_list_quad = [quad]
-                    optimizer_camera = torch.optim.Adam([{'params': cam_para_list_T, 'lr': self.cam_lr},
-                                                         # {'params': cam_para_list_quad, 'lr': self.cam_lr * 5}])
-                                                         {'params': cam_para_list_quad, 'lr': self.cam_lr * 0.2}])
-                else:
-                    pose6d = Variable(pose6d, requires_grad=True)
-                    cam_para_list = [pose6d]
-                    optimizer_camera = torch.optim.Adam(cam_para_list, lr=self.cam_lr)
+                # T = pose6d[:, -3:]
+                # R = pose6d[:,:4]
+                # T = Variable(pose6d[:, -3:].clone(), requires_grad=True)
+                # R = Variable(pose6d[:,:4].clone(), requires_grad=True)
+                T = torch.nn.Parameter(pose6d[:, -3:].clone())
+                R = torch.nn.Parameter(pose6d[:,:4].clone())
+                cam_para_list_T = [T]
+                cam_para_list_R = [R]
+                optimizer_camera = torch.optim.Adam([{'params': cam_para_list_T, 'lr': self.cam_lr_T},
+                                                     {'params': cam_para_list_R, 'lr': self.cam_lr_R}])
+                # breakpoint()
+                # pose6d = Variable(pose6d, requires_grad=True)
+                # cam_para_list = [pose6d]
+                # optimizer_camera = torch.optim.Adam(cam_para_list, lr=self.cam_lr_T)
 
                 candidate_cam_pose6d = None
                 current_min_loss = 10000000000.
                 for cam_iter in range(self.num_cam_iters):
-                    if self.seperate_LR:
-                        pose6d = torch.cat([quad, T], -1)
+                    pose6d = torch.cat([R, T], -1)
 
                     self.visualizer.vis(idx, cam_iter, gt_depth, gt_color, pose6d, all_planes, self.decoders)
 
                     loss = self.optimize_cam_in_batch(pose6d, gt_color, gt_depth, self.tracking_pixels, optimizer_camera)
                     if loss < current_min_loss:
                         current_min_loss = loss
-                        candidate_cam_pose6d = pose6d.detach()
+                        candidate_cam_pose6d = pose6d.clone().detach()
 
                 c2w = pose6d_to_matrix(candidate_cam_pose6d)
 

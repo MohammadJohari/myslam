@@ -97,18 +97,18 @@ def calc_3d_metric(rec_meshfile, gt_meshfile, align=True):
         transformation = get_align_transformation(rec_meshfile, gt_meshfile)
         mesh_rec = mesh_rec.apply_transform(transformation)
 
-    rec_pc = trimesh.sample.sample_surface(mesh_rec, 1500000)
+    rec_pc = trimesh.sample.sample_surface(mesh_rec, 400000)
     rec_pc_tri = trimesh.PointCloud(vertices=rec_pc[0])
-    gt_pc = trimesh.sample.sample_surface(mesh_gt, 1500000)
+    gt_pc = trimesh.sample.sample_surface(mesh_gt, 400000)
     gt_pc_tri = trimesh.PointCloud(vertices=gt_pc[0])
-    # accuracy_rec = accuracy(gt_pc_tri.vertices, rec_pc_tri.vertices)
+    accuracy_rec = accuracy(gt_pc_tri.vertices, rec_pc_tri.vertices)
     completion_rec = completion(gt_pc_tri.vertices, rec_pc_tri.vertices)
     completion_ratio_rec = completion_ratio(
         gt_pc_tri.vertices, rec_pc_tri.vertices)
-    # accuracy_rec *= 100  # convert to cm
+    accuracy_rec *= 100  # convert to cm
     completion_rec *= 100  # convert to cm
     completion_ratio_rec *= 100  # convert to %
-    # print('accuracy: ', accuracy_rec)
+    print('accuracy: ', accuracy_rec)
     print('completion: ', completion_rec)
     print('completion ratio: ', completion_ratio_rec)
 
@@ -131,7 +131,7 @@ def calc_2d_metric(rec_meshfile, gt_meshfile, align=True, n_imgs=1000):
     """
     H = 500
     W = 500
-    focal = 600
+    focal = 300
     fx = focal
     fy = focal
     cx = H/2.0-0.5
@@ -141,7 +141,7 @@ def calc_2d_metric(rec_meshfile, gt_meshfile, align=True, n_imgs=1000):
     rec_mesh = o3d.io.read_triangle_mesh(rec_meshfile)
     # unseen_gt_pointcloud_file = gt_meshfile.replace('.ply', '_pc_unseen.npy')
     unseen_gt_pointcloud_file = gt_meshfile.replace('_culled.ply', '_pc_unseen.npy')
-    # pc_unseen = np.load(unseen_gt_pointcloud_file)
+    pc_unseen = np.load(unseen_gt_pointcloud_file)
     if align:
         transformation = get_align_transformation(rec_meshfile, gt_meshfile)
         rec_mesh = rec_mesh.transform(transformation)
@@ -153,8 +153,7 @@ def calc_2d_metric(rec_meshfile, gt_meshfile, align=True, n_imgs=1000):
     vis.create_window(width=W, height=H)
     vis.get_render_option().mesh_show_back_face = True
     errors = []
-    from tqdm import tqdm
-    for i in tqdm(range(n_imgs)):
+    for i in range(n_imgs):
         while True:
             # sample view, and check if unseen region is not inside the camera view
             # if inside, then needs to resample
@@ -171,7 +170,6 @@ def calc_2d_metric(rec_meshfile, gt_meshfile, align=True, n_imgs=1000):
             tmp = np.eye(4)
             tmp[:3, :] = c2w
             c2w = tmp
-            break
             seen = check_proj(pc_unseen, W, H, fx, fy, cx, cy, c2w)
             if (~seen):
                 break
@@ -202,11 +200,8 @@ def calc_2d_metric(rec_meshfile, gt_meshfile, align=True, n_imgs=1000):
         ours_depth = np.asarray(ours_depth)
         vis.remove_geometry(rec_mesh, reset_bounding_box=True,)
 
-        mask = (gt_depth > 0) & (ours_depth > 0)
-        if mask.astype('float').mean() > 0.5:
-            errors += [np.abs(gt_depth[mask]-ours_depth[mask]).mean()]
+        errors += [np.abs(gt_depth-ours_depth).mean()]
 
-    print(len(errors))
     errors = np.array(errors)
     # from m to cm
     print('Depth L1: ', errors.mean()*100)
@@ -230,4 +225,4 @@ if __name__ == '__main__':
         calc_3d_metric(args.rec_mesh, args.gt_mesh)
 
     if args.metric_2d:
-        calc_2d_metric(args.rec_mesh, args.gt_mesh, n_imgs=100)
+        calc_2d_metric(args.rec_mesh, args.gt_mesh, n_imgs=1000)
