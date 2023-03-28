@@ -37,8 +37,9 @@ from src import config
 def cull_mesh(mesh_file, cfg, args, device, estimate_c2w_list=None):
     frame_reader = get_dataset(cfg, args, 1, device=device)
 
-    H, W, fx, fy, cx, cy = cfg['cam']['H'], cfg['cam']['W'], cfg['cam']['fx'], cfg['cam']['fy'], cfg['cam']['cx'], cfg['cam']['cy']
     eval_rec = cfg['meshing']['eval_rec']
+    truncation = cfg['model']['truncation']
+    H, W, fx, fy, cx, cy = cfg['cam']['H'], cfg['cam']['W'], cfg['cam']['fx'], cfg['cam']['fy'], cfg['cam']['cx'], cfg['cam']['cy']
 
     if estimate_c2w_list is not None:
         n_imgs = len(estimate_c2w_list)
@@ -82,8 +83,7 @@ def cull_mesh(mesh_file, cfg, args, device, estimate_c2w_list=None):
 
         edge = 0
         if eval_rec:
-            eps = 0.06
-            mask = (depth_samples + eps >= -z[:, 0, 0]) & (0 <= -z[:, 0, 0]) & (uv[:, 0] < W - edge) & (uv[:, 0] > edge) & (uv[:, 1] < H - edge) & (uv[:, 1] > edge)
+            mask = (depth_samples + truncation >= -z[:, 0, 0]) & (0 <= -z[:, 0, 0]) & (uv[:, 0] < W - edge) & (uv[:, 0] > edge) & (uv[:, 1] < H - edge) & (uv[:, 1] > edge)
         else:
             mask = (0 <= -z[:, 0, 0]) & (uv[:, 0] < W -edge) & (uv[:, 0] > edge) & (uv[:, 1] < H-edge) & (uv[:, 1] > edge)
 

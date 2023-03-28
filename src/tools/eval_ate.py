@@ -184,6 +184,7 @@ def evaluate_ate(first_list, second_list, plot="", _args=""):
                                    for value in second_list[b][0:3]] for b in second_stamps]).transpose()
     second_xyz_full_aligned = rot * second_xyz_full + trans
 
+    args.verbose = True
     if args.verbose:
         print("compared_pose_pairs %d pairs" % (len(trans_error)))
 

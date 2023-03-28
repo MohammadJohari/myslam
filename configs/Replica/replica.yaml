@@ -3,7 +3,7 @@ meshing:
   resolution: 0.01 #cm # Increase this number to speed up meshing algorithm
   eval_rec: True
 tracking:
-  lr_T: 0.001
+  lr_T: 0.002
   lr_R: 0.001
   pixels: 2000
   iters: 8

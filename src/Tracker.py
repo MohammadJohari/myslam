@@ -70,7 +70,11 @@ class Tracker(object):
         self.num_cam_iters = cfg['tracking']['iters']
         self.gt_camera = cfg['tracking']['gt_camera']
         self.tracking_pixels = cfg['tracking']['pixels']
-        self.w_color_loss = cfg['tracking']['w_color_loss']
+        self.w_sdf_fs = cfg['tracking']['w_sdf_fs']
+        self.w_sdf_center = cfg['tracking']['w_sdf_center']
+        self.w_sdf_tail = cfg['tracking']['w_sdf_tail']
+        self.w_depth = cfg['tracking']['w_depth']
+        self.w_color = cfg['tracking']['w_color']
         self.ignore_edge_W = cfg['tracking']['ignore_edge_W']
         self.ignore_edge_H = cfg['tracking']['ignore_edge_H']
         self.const_speed_assumption = cfg['tracking']['const_speed_assumption']
@@ -104,18 +108,41 @@ class Tracker(object):
         for p in self.decoders.parameters():
             p.requires_grad_(False)
 
-    def sdf_loss(self, sdf, z_vals, gt_depth):
-        front_mask = torch.where(z_vals < (gt_depth[:, None] - self.truncation), torch.ones_like(z_vals), torch.zeros_like(z_vals)).bool()
-        back_mask = torch.where(z_vals > (gt_depth[:, None] + self.truncation), torch.ones_like(z_vals), torch.zeros_like(z_vals)).bool()        
-        center_mask = torch.where((z_vals > (gt_depth[:, None] - 0.4 * self.truncation)) * 
-                        (z_vals < (gt_depth[:, None] + 0.4 * self.truncation)), torch.ones_like(z_vals), torch.zeros_like(z_vals)).bool()
+    def sdf_losses(self, sdf, z_vals, gt_depth):
+        """
+        Computes the losses for a signed distance function (SDF) given its values, depth values and ground truth depth.
+
+        Args:
+        - self: instance of the class containing this method
+        - sdf: a tensor of shape (R, N) representing the SDF values
+        - z_vals: a tensor of shape (R, N) representing the depth values
+        - gt_depth: a tensor of shape (R,) containing the ground truth depth values
+
+        Returns:
+        - sdf_losses: a scalar tensor representing the weighted sum of the free space, center, and tail losses of SDF
+        """
+
+        front_mask = torch.where(z_vals < (gt_depth[:, None] - self.truncation),
+                                 torch.ones_like(z_vals), torch.zeros_like(z_vals)).bool()
+
+        back_mask = torch.where(z_vals > (gt_depth[:, None] + self.truncation),
+                                torch.ones_like(z_vals), torch.zeros_like(z_vals)).bool()
+
+        center_mask = torch.where((z_vals > (gt_depth[:, None] - 0.4 * self.truncation)) *
+                                  (z_vals < (gt_depth[:, None] + 0.4 * self.truncation)),
+                                  torch.ones_like(z_vals), torch.zeros_like(z_vals)).bool()
+
         tail_mask = (~front_mask) * (~back_mask) * (~center_mask)
 
         fs_loss = torch.mean(torch.square(sdf[front_mask] - torch.ones_like(sdf[front_mask])))
-        center_loss = torch.mean(torch.square((z_vals + sdf * self.truncation)[center_mask] - gt_depth[:, None].expand(z_vals.shape)[center_mask]))
-        tail_loss = torch.mean(torch.square((z_vals + sdf * self.truncation)[tail_mask] - gt_depth[:, None].expand(z_vals.shape)[tail_mask]))
-       
-        return 10 * fs_loss + 200 * center_loss + 50 * tail_loss
+        center_loss = torch.mean(torch.square(
+            (z_vals + sdf * self.truncation)[center_mask] - gt_depth[:, None].expand(z_vals.shape)[center_mask]))
+        tail_loss = torch.mean(torch.square(
+            (z_vals + sdf * self.truncation)[tail_mask] - gt_depth[:, None].expand(z_vals.shape)[tail_mask]))
+
+        sdf_losses = self.w_sdf_fs * fs_loss + self.w_sdf_center * center_loss + self.w_sdf_tail * tail_loss
+
+        return sdf_losses
 
     def optimize_cam_in_batch(self, pose6d, gt_color, gt_depth, batch_size, optimizer):
         """
@@ -170,13 +197,13 @@ class Tracker(object):
         diff_median = depth_diff.median()
         good_mask = (depth_diff < 10 * diff_median)
 
-        loss = self.sdf_loss(sdf[good_mask], z_vals[good_mask], batch_gt_depth[good_mask])
+        loss = self.sdf_losses(sdf[good_mask], z_vals[good_mask], batch_gt_depth[good_mask])
 
-        color_loss = torch.square(batch_gt_color - color)[good_mask].mean()
-        loss += self.w_color_loss * color_loss
+        ## Color Loss
+        loss = loss + self.w_color * torch.square(batch_gt_color - color)[good_mask].mean()
 
         ### Depth loss
-        loss = loss + 1 * torch.square(batch_gt_depth[good_mask] - depth[good_mask]).mean()
+        loss = loss + self.w_depth * torch.square(batch_gt_depth[good_mask] - depth[good_mask]).mean()
 
         optimizer.zero_grad()
         loss.backward()
@@ -263,8 +290,8 @@ class Tracker(object):
                 R = torch.nn.Parameter(pose6d[:,:4].clone())
                 cam_para_list_T = [T]
                 cam_para_list_R = [R]
-                optimizer_camera = torch.optim.Adam([{'params': cam_para_list_T, 'lr': self.cam_lr_T},
-                                                     {'params': cam_para_list_R, 'lr': self.cam_lr_R}])
+                optimizer_camera = torch.optim.Adam([{'params': cam_para_list_T, 'lr': self.cam_lr_T, 'betas':(0.5, 0.999)},
+                                                     {'params': cam_para_list_R, 'lr': self.cam_lr_R, 'betas':(0.5, 0.999)}])
                 # breakpoint()
                 # pose6d = Variable(pose6d, requires_grad=True)
                 # cam_para_list = [pose6d]

@@ -72,7 +72,7 @@ class ESLAM():
         self.scale = cfg['scale']
 
         self.load_bound(cfg)
-        self.grid_init(cfg)
+        self.init_planes(cfg)
 
         # need to use spawn
         try:
@@ -91,12 +91,14 @@ class ESLAM():
         self.idx.share_memory_()
         self.mapping_first_frame = torch.zeros((1)).int()
         self.mapping_first_frame.share_memory_()
+
         # the id of the newest frame Mapper is processing
         self.mapping_idx = torch.zeros((1)).int()
         self.mapping_idx.share_memory_()
         self.mapping_cnt = torch.zeros((1)).int()  # counter for mapping
         self.mapping_cnt.share_memory_()
 
+        ## Moving feature planes and decoders to the processing device
         for shared_planes in [self.shared_planes_xy, self.shared_planes_xz, self.shared_planes_yz]:
             for i, plane in enumerate(shared_planes):
                 plane = plane.to(self.device)
@@ -121,14 +123,9 @@ class ESLAM():
 
     def print_output_desc(self):
         print(f"INFO: The output folder is {self.output}")
-        if 'Demo' in self.output:
-            print(
-                f"INFO: The GT, generated and residual depth/color images can be found under " +
-                f"{self.output}/vis/")
-        else:
-            print(
-                f"INFO: The GT, generated and residual depth/color images can be found under " +
-                f"{self.output}/tracking_vis/ and {self.output}/mapping_vis/")
+        print(
+            f"INFO: The GT, generated and residual depth/color images can be found under " +
+            f"{self.output}/tracking_vis/ and {self.output}/mapping_vis/")
         print(f"INFO: The mesh can be found under {self.output}/mesh/")
         print(f"INFO: The checkpoint can be found under {self.output}/ckpt/")
 
@@ -163,6 +160,7 @@ class ESLAM():
         Args:
             cfg (dict): parsed config dict.
         """
+
         # scale the bound if there is a global scaling factor
         self.bound = torch.from_numpy(np.array(cfg['mapping']['bound'])*self.scale).float()
         bound_dividable = cfg['planes_res']['bound_dividable']
@@ -171,9 +169,9 @@ class ESLAM():
                             bound_dividable).int()+1)*bound_dividable+self.bound[:, 0]
         self.shared_decoders.bound = self.bound
 
-    def grid_init(self, cfg):
+    def init_planes(self, cfg):
         """
-        Initialize the hierarchical feature grids.
+        Initialize the feature planes.
 
         Args:
             cfg (dict): parsed config dict.
@@ -225,7 +223,7 @@ class ESLAM():
         """
 
         # should wait until the mapping of first frame is finished
-        while (1):
+        while True:
             if self.mapping_first_frame[0] == 1:
                 break
             time.sleep(1)
@@ -257,7 +255,6 @@ class ESLAM():
             processes.append(p)
         for p in processes:
             p.join()
-
 
 # This part is required by torch.multiprocessing
 if __name__ == '__main__':
