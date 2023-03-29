@@ -37,4 +37,4 @@ cam:  #NOTE: intrinsic is different per scene in TUM
 rendering:
   n_stratified: 48
   n_importance: 8
-  learnable_beta: False
+  learnable_beta: True

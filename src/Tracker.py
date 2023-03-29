@@ -20,22 +20,23 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import torch
 import copy
 import os
 import time
 
-import numpy as np
-import torch
 from colorama import Fore, Style
-from torch.autograd import Variable
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
-from src.common import (matrix_to_pose6d, pose6d_to_matrix, get_samples)
+from src.common import (matrix_to_cam_pose, cam_pose_to_matrix, get_samples)
 from src.utils.datasets import get_dataset
 from src.utils.Visualizer import Visualizer
 
 class Tracker(object):
+    """
+    Tracking main class.
+    """
     def __init__(self, cfg, args, slam
                  ):
         self.cfg = cfg
@@ -83,14 +84,15 @@ class Tracker(object):
         self.no_vis_on_first_frame = cfg['tracking']['no_vis_on_first_frame']
 
         self.prev_mapping_idx = -1
-        self.frame_reader = get_dataset(
-            cfg, args, self.scale, device=self.device)
+        self.frame_reader = get_dataset(cfg, args, self.scale, device=self.device)
         self.n_img = len(self.frame_reader)
-        self.frame_loader = DataLoader(
-            self.frame_reader, batch_size=1, shuffle=False, num_workers=1, pin_memory=True, prefetch_factor=2)
+        self.frame_loader = DataLoader(self.frame_reader, batch_size=1, shuffle=False,
+                                       num_workers=1, pin_memory=True, prefetch_factor=2)
+
         self.visualizer = Visualizer(freq=cfg['tracking']['vis_freq'], inside_freq=cfg['tracking']['vis_inside_freq'],
-                                     vis_dir=os.path.join(self.output, 'vis' if 'Demo' in self.output else 'tracking_vis'),
-                                     renderer=self.renderer, truncation=self.truncation, verbose=self.verbose, device=self.device)
+                                     vis_dir=os.path.join(self.output, 'tracking_vis'), renderer=self.renderer,
+                                     truncation=self.truncation, verbose=self.verbose, device=self.device)
+
         self.H, self.W, self.fx, self.fy, self.cx, self.cy = slam.H, slam.W, slam.fx, slam.fy, slam.cx, slam.cy
 
         self.decoders = copy.deepcopy(self.shared_decoders)
@@ -102,8 +104,6 @@ class Tracker(object):
         self.c_planes_xy = copy.deepcopy(self.shared_c_planes_xy)
         self.c_planes_xz = copy.deepcopy(self.shared_c_planes_xz)
         self.c_planes_yz = copy.deepcopy(self.shared_c_planes_yz)
-
-        self.depth_map_err = 0
 
         for p in self.decoders.parameters():
             p.requires_grad_(False)
@@ -144,12 +144,12 @@ class Tracker(object):
 
         return sdf_losses
 
-    def optimize_cam_in_batch(self, pose6d, gt_color, gt_depth, batch_size, optimizer):
+    def optimize_tracking(self, cam_pose, gt_color, gt_depth, batch_size, optimizer):
         """
-        Do one iteration of camera iteration. Sample pixels, render depth/color, calculate loss and backpropagation.
+        Do one iteration of camera tracking. Sample pixels, render depth/color, calculate loss and backpropagation.
 
         Args:
-            camera_tensor (tensor): camera tensor.
+            cam_pose (tensor): camera pose.
             gt_color (tensor): ground truth color image of the current frame.
             gt_depth (tensor): ground truth depth image of the current frame.
             batch_size (int): batch size, number of sampling rays.
@@ -159,15 +159,14 @@ class Tracker(object):
             loss (float): The value of loss.
         """
         all_planes = (self.planes_xy, self.planes_xz, self.planes_yz, self.c_planes_xy, self.c_planes_xz, self.c_planes_yz)
-        # with torch.autocast(device_type='cuda', dtype=torch.bfloat16):
         device = self.device
         H, W, fx, fy, cx, cy = self.H, self.W, self.fx, self.fy, self.cx, self.cy
 
-        c2w = pose6d_to_matrix(pose6d)
-        Wedge = self.ignore_edge_W
-        Hedge = self.ignore_edge_H
-        batch_rays_o, batch_rays_d, batch_gt_depth, batch_gt_color = get_samples(
-            Hedge, H-Hedge, Wedge, W-Wedge, batch_size, H, W, fx, fy, cx, cy, c2w, gt_depth, gt_color, self.device)
+        c2w = cam_pose_to_matrix(cam_pose)
+        batch_rays_o, batch_rays_d, batch_gt_depth, batch_gt_color = get_samples(self.ignore_edge_H, H-self.ignore_edge_H,
+                                                                                 self.ignore_edge_W, W-self.ignore_edge_W,
+                                                                                 batch_size, H, W, fx, fy, cx, cy, c2w,
+                                                                                 gt_depth, gt_color, device)
 
         # should pre-filter those out of bounding box depth value
         with torch.no_grad():
@@ -184,26 +183,22 @@ class Tracker(object):
         batch_gt_depth = batch_gt_depth[inside_mask]
         batch_gt_color = batch_gt_color[inside_mask]
 
-        ret = self.renderer.render_batch_ray(all_planes,
-                                             self.decoders, batch_rays_d,
-                                             batch_rays_o, self.device, self.truncation,
-                                             gt_depth=batch_gt_depth)
-        depth, color, sdf, z_vals = ret
+        depth, color, sdf, z_vals = self.renderer.render_batch_ray(all_planes, self.decoders, batch_rays_d, batch_rays_o,
+                                                                   self.device, self.truncation, gt_depth=batch_gt_depth)
 
-        depth_diff = (batch_gt_depth - depth).abs()
+        ## Filtering the rays for which the rendered depth error is greater than 10 times of the median depth error
+        depth_error = (batch_gt_depth - depth.detach()).abs()
+        error_median = depth_error.median()
+        depth_mask = (depth_error < 10 * error_median)
 
-        self.depth_map_err = 0.9 * self.depth_map_err + 0.1 * depth_diff[depth_diff < 0.5].detach().mean()
-
-        diff_median = depth_diff.median()
-        good_mask = (depth_diff < 10 * diff_median)
-
-        loss = self.sdf_losses(sdf[good_mask], z_vals[good_mask], batch_gt_depth[good_mask])
+        ## SDF losses
+        loss = self.sdf_losses(sdf[depth_mask], z_vals[depth_mask], batch_gt_depth[depth_mask])
 
         ## Color Loss
-        loss = loss + self.w_color * torch.square(batch_gt_color - color)[good_mask].mean()
+        loss = loss + self.w_color * torch.square(batch_gt_color - color)[depth_mask].mean()
 
         ### Depth loss
-        loss = loss + self.w_depth * torch.square(batch_gt_depth[good_mask] - depth[good_mask]).mean()
+        loss = loss + self.w_depth * torch.square(batch_gt_depth[depth_mask] - depth[depth_mask]).mean()
 
         optimizer.zero_grad()
         loss.backward()
@@ -211,10 +206,9 @@ class Tracker(object):
 
         return loss.item()
 
-    def update_para_from_mapping(self):
+    def update_params_from_mapping(self):
         """
         Update the parameters of scene representation from the mapping thread.
-
         """
         if self.mapping_idx[0] != self.prev_mapping_idx:
             if self.verbose:
@@ -237,6 +231,15 @@ class Tracker(object):
             self.prev_mapping_idx = self.mapping_idx[0].clone()
 
     def run(self):
+        """
+            Runs the tracking thread for the input RGB-D frames.
+
+            Args:
+                None
+
+            Returns:
+                None
+        """
         device = self.device
         all_planes = (self.planes_xy, self.planes_xz, self.planes_yz, self.c_planes_xy, self.c_planes_xz, self.c_planes_yz)
 
@@ -246,20 +249,21 @@ class Tracker(object):
             pbar = tqdm(self.frame_loader, smoothing=0.05)
 
         for idx, gt_color, gt_depth, gt_c2w in pbar:
-            gt_color, gt_depth, gt_c2w = gt_color.to(device, non_blocking=True), gt_depth.to(device, non_blocking=True), gt_c2w.to(device, non_blocking=True)
+            gt_color = gt_color.to(device, non_blocking=True)
+            gt_depth = gt_depth.to(device, non_blocking=True)
+            gt_c2w = gt_c2w.to(device, non_blocking=True)
+
             if not self.verbose:
                 pbar.set_description(f"Tracking Frame {idx[0]}")
             idx = idx[0]
 
             # initiate mapping every self.every_frame frames
             if idx > 0 and (idx % self.every_frame == 1 or self.every_frame == 1):
-                while self.mapping_idx[0] != idx-1:
+                while self.mapping_idx[0] != idx - 1:
                     time.sleep(0.001)
-                pre_c2w = self.estimate_c2w_list[idx-1].unsqueeze(0).to(device)
-                        
-            start_time = time.time()
-            
-            self.update_para_from_mapping()
+                pre_c2w = self.estimate_c2w_list[idx - 1].unsqueeze(0).to(device)
+
+            self.update_params_from_mapping()
 
             if self.verbose:
                 print(Fore.MAGENTA)
@@ -269,52 +273,39 @@ class Tracker(object):
             if idx == 0 or self.gt_camera:
                 c2w = gt_c2w
                 if not self.no_vis_on_first_frame:
-                    self.visualizer.vis(
-                        idx, 0, gt_depth, gt_color, c2w.squeeze(), all_planes, self.decoders)
+                    self.visualizer.vis(idx, 0, gt_depth, gt_color, c2w.squeeze(), all_planes, self.decoders)
 
             else:
-                # gt_pose6d = matrix_to_pose6d(gt_c2w)
-
-                if self.const_speed_assumption and idx-2 >= 0:
+                if self.const_speed_assumption and idx - 2 >= 0:
+                    ## Linear prediction for initialization
                     pre_poses = torch.stack([self.estimate_c2w_list[idx - 2], pre_c2w.squeeze(0)], dim=0)
-                    pre_poses = matrix_to_pose6d(pre_poses)
-                    pose6d = 2 * pre_poses[1:] - pre_poses[0:1]
+                    pre_poses = matrix_to_cam_pose(pre_poses)
+                    cam_pose = 2 * pre_poses[1:] - pre_poses[0:1]
                 else:
-                    pose6d = matrix_to_pose6d(pre_c2w)
+                    ## Initialize with the last known pose
+                    cam_pose = matrix_to_cam_pose(pre_c2w)
 
-                # T = pose6d[:, -3:]
-                # R = pose6d[:,:4]
-                # T = Variable(pose6d[:, -3:].clone(), requires_grad=True)
-                # R = Variable(pose6d[:,:4].clone(), requires_grad=True)
-                T = torch.nn.Parameter(pose6d[:, -3:].clone())
-                R = torch.nn.Parameter(pose6d[:,:4].clone())
+                T = torch.nn.Parameter(cam_pose[:, -3:].clone())
+                R = torch.nn.Parameter(cam_pose[:,:4].clone())
                 cam_para_list_T = [T]
                 cam_para_list_R = [R]
                 optimizer_camera = torch.optim.Adam([{'params': cam_para_list_T, 'lr': self.cam_lr_T, 'betas':(0.5, 0.999)},
                                                      {'params': cam_para_list_R, 'lr': self.cam_lr_R, 'betas':(0.5, 0.999)}])
-                # breakpoint()
-                # pose6d = Variable(pose6d, requires_grad=True)
-                # cam_para_list = [pose6d]
-                # optimizer_camera = torch.optim.Adam(cam_para_list, lr=self.cam_lr_T)
 
-                candidate_cam_pose6d = None
-                current_min_loss = 10000000000.
+                current_min_loss = torch.tensor(float('inf')).float().to(device)
                 for cam_iter in range(self.num_cam_iters):
-                    pose6d = torch.cat([R, T], -1)
+                    cam_pose = torch.cat([R, T], -1)
 
-                    self.visualizer.vis(idx, cam_iter, gt_depth, gt_color, pose6d, all_planes, self.decoders)
+                    self.visualizer.vis(idx, cam_iter, gt_depth, gt_color, cam_pose, all_planes, self.decoders)
 
-                    loss = self.optimize_cam_in_batch(pose6d, gt_color, gt_depth, self.tracking_pixels, optimizer_camera)
+                    loss = self.optimize_tracking(cam_pose, gt_color, gt_depth, self.tracking_pixels, optimizer_camera)
                     if loss < current_min_loss:
                         current_min_loss = loss
-                        candidate_cam_pose6d = pose6d.clone().detach()
+                        candidate_cam_pose = cam_pose.clone().detach()
 
-                c2w = pose6d_to_matrix(candidate_cam_pose6d)
+                c2w = cam_pose_to_matrix(candidate_cam_pose)
 
             self.estimate_c2w_list[idx] = c2w.squeeze(0).clone()
             self.gt_c2w_list[idx] = gt_c2w.squeeze(0).clone()
             pre_c2w = c2w.clone()
             self.idx[0] = idx
-
-            if self.verbose:
-                print("---Tracking Time: %s seconds ---" % (time.time() - start_time))

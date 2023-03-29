@@ -24,7 +24,7 @@ import os
 import torch
 import numpy as np
 import matplotlib.pyplot as plt
-from src.common import pose6d_to_matrix
+from src.common import cam_pose_to_matrix
 
 
 class Visualizer(object):
@@ -64,7 +64,7 @@ class Visualizer(object):
                 gt_color_np = gt_color.squeeze(0).cpu().numpy()
 
                 if c2w_or_camera_tensor.shape[-1] > 4: ## 6od
-                    c2w = pose6d_to_matrix(c2w_or_camera_tensor.detach()).squeeze()
+                    c2w = cam_pose_to_matrix(c2w_or_camera_tensor.detach()).squeeze()
                 else:
                     c2w = c2w_or_camera_tensor.squeeze().detach()
 

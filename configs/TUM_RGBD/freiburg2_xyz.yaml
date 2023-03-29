@@ -6,7 +6,7 @@ mapping:
   marching_cubes_bound: [[-5.0,13.4],[-5.0,13.7],[-5.0,5.0]]
 data:
   input_folder: /idiap/temp/mjohari/Datasets/TUM_RGBD/rgbd_dataset_freiburg2_xyz
-  output: /idiap/temp/mjohari/outputs/slam/TUM/camrdy/eslam_beta_xyz
+  output: /idiap/temp/mjohari/outputs/slam/TUM/camrdy/eslam_beta_xyz_nobeta
 #  output: /idiap/temp/mjohari/outputs/slam/TUM/nice_xyz
 cam:  #intrinsic is different per scene in TUM
   H: 480

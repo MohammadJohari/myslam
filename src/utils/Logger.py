@@ -17,15 +17,13 @@ class Logger(object):
         self.shared_decoders = slam.shared_decoders
         self.estimate_c2w_list = slam.estimate_c2w_list
 
-    def log(self, idx, keyframe_dict, keyframe_list, selected_keyframes=None):
+    def log(self, idx, keyframe_list):
         path = os.path.join(self.ckptsdir, '{:05d}.tar'.format(idx))
         torch.save({
             'decoder_state_dict': self.shared_decoders.state_dict(),
             'gt_c2w_list': self.gt_c2w_list,
             'estimate_c2w_list': self.estimate_c2w_list,
             'keyframe_list': keyframe_list,
-            # 'keyframe_dict': keyframe_dict, # to save keyframe_dict into ckpt, uncomment this line
-            'selected_keyframes': selected_keyframes,
             'idx': idx,
         }, path, _use_new_zipfile_serialization=False)
 

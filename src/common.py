@@ -203,10 +203,10 @@ def matrix_to_axis_angle(rot):
     """
     return quaternion_to_axis_angle(matrix_to_quaternion(rot))
 
-def matrix_to_pose6d(batch_matrices):
+def matrix_to_cam_pose(batch_matrices):
     return torch.cat([matrix_to_quaternion(batch_matrices[:,:3,:3]), batch_matrices[:,:3,3]], dim=-1)
 
-def pose6d_to_matrix(batch_poses):
+def cam_pose_to_matrix(batch_poses):
     c2w = torch.eye(4, device=batch_poses.device).unsqueeze(0).repeat(batch_poses.shape[0], 1, 1)
     c2w[:,:3,:3] = quaternion_to_matrix(batch_poses[:,:4])
     c2w[:,:3,3] = batch_poses[:,4:]

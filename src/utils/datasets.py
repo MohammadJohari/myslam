@@ -257,12 +257,6 @@ class ScanNet(BaseDataset):
             c2w = torch.from_numpy(c2w).float()
             self.poses.append(c2w)
 
-        # from src.common import (get_samples, random_select, matrix_to_pose6d, pose6d_to_matrix)
-        # c2ws = torch.stack(self.poses, dim=0)
-        # poses = matrix_to_pose6d(c2ws)
-        # diff = poses[1:] - poses[:-1]
-        # breakpoint()
-
 
 class CoFusion(BaseDataset):
     def __init__(self, cfg, args, scale, device='cuda:0'

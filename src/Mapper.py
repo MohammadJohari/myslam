@@ -20,27 +20,23 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import torch
+import torch.nn as nn
+from torch.utils.data import DataLoader
+
 import os
 import time
 
-import cv2
-import numpy as np
-import torch
 from colorama import Fore, Style
-from torch.autograd import Variable
 
-from src.common import (get_samples, random_select, matrix_to_pose6d, pose6d_to_matrix)
+from src.common import (get_samples, random_select, matrix_to_cam_pose, cam_pose_to_matrix)
 from src.utils.datasets import get_dataset, SeqSampler
 from src.utils.Visualizer import Visualizer
 from src.tools.cull_mesh import cull_mesh
 
-import torch.nn.functional as F
-from torch.utils.data import DataLoader
-
 class Mapper(object):
     """
-    Mapper thread.
-
+    Tracking main class.
     """
 
     def __init__(self, cfg, args, slam):
@@ -70,7 +66,6 @@ class Mapper(object):
 
         self.estimate_c2w_list = slam.estimate_c2w_list
         self.mapping_first_frame = slam.mapping_first_frame
-
 
         self.scale = cfg['scale']
         self.device = cfg['device']
@@ -209,7 +204,7 @@ class Mapper(object):
 
         return selected_keyframes
 
-    def optimize_map(self, iters, lr_factor, idx, cur_gt_color, cur_gt_depth, gt_cur_c2w, keyframe_dict, keyframe_list, cur_c2w):
+    def optimize_mapping(self, iters, lr_factor, idx, cur_gt_color, cur_gt_depth, gt_cur_c2w, keyframe_dict, keyframe_list, cur_c2w):
         """
         Mapping iterations. Sample pixels from selected keyframes,
         then optimize scene representation and camera poses(if joint_opt enables).
@@ -221,7 +216,7 @@ class Mapper(object):
             cur_gt_color (tensor): gt_color image of the current camera.
             cur_gt_depth (tensor): gt_depth image of the current camera.
             gt_cur_c2w (tensor): groundtruth camera to world matrix corresponding to current frame.
-            keyframe_dict (dictionary): dictionary of keyframes info.
+            keyframe_dict (list): a list of dictionaries of keyframes info.
             keyframe_list (list): list of keyframes indices.
             cur_c2w (tensor): the estimated camera to world matrix of current frame. 
 
@@ -255,14 +250,14 @@ class Mapper(object):
         planes_para = []
         for planes in [self.planes_xy, self.planes_xz, self.planes_yz]:
             for i, plane in enumerate(planes):
-                plane = Variable(plane, requires_grad=True)
+                plane = nn.Parameter(plane)
                 planes_para.append(plane)
                 planes[i] = plane
 
         c_planes_para = []
         for c_planes in [self.c_planes_xy, self.c_planes_xz, self.c_planes_yz]:
             for i, c_plane in enumerate(c_planes):
-                c_plane = Variable(c_plane, requires_grad=True)
+                c_plane = nn.Parameter(c_plane)
                 c_planes_para.append(c_plane)
                 c_planes[i] = c_plane
 
@@ -287,43 +282,42 @@ class Mapper(object):
         c2ws = torch.stack(c2ws, dim=0)
 
         if self.joint_opt:
-            pose6ds = Variable(matrix_to_pose6d(c2ws[1:]), requires_grad=True)
+            cam_poses = nn.Parameter(matrix_to_cam_pose(c2ws[1:]))
 
             optimizer = torch.optim.Adam([{'params': decoders_para_list, 'lr': 0},
-                              {'params': planes_para, 'lr': 0},
-                              {'params': c_planes_para, 'lr': 0},
-                              {'params': [pose6ds], 'lr': 0}])
+                                          {'params': planes_para, 'lr': 0},
+                                          {'params': c_planes_para, 'lr': 0},
+                                          {'params': [cam_poses], 'lr': 0}])
 
         else:
             optimizer = torch.optim.Adam([{'params': decoders_para_list, 'lr': 0},
                                           {'params': planes_para, 'lr': 0},
                                           {'params': c_planes_para, 'lr': 0}])
 
+        optimizer.param_groups[0]['lr'] = cfg['mapping']['lr']['decoders_lr'] * lr_factor
+        optimizer.param_groups[1]['lr'] = cfg['mapping']['lr']['planes_lr'] * lr_factor
+        optimizer.param_groups[2]['lr'] = cfg['mapping']['lr']['c_planes_lr'] * lr_factor
+
+        if self.joint_opt:
+            optimizer.param_groups[3]['lr'] = self.joint_opt_cam_lr
+
         for joint_iter in range(iters):
-            optimizer.param_groups[0]['lr'] = cfg['mapping']['lr']['decoders_lr'] * lr_factor
-            optimizer.param_groups[1]['lr'] = cfg['mapping']['lr']['planes_lr'] * lr_factor
-            optimizer.param_groups[2]['lr'] = cfg['mapping']['lr']['c_planes_lr'] * lr_factor
-
-            if self.joint_opt:
-                optimizer.param_groups[3]['lr'] = self.joint_opt_cam_lr
-
             if (not (idx == 0 and self.no_vis_on_first_frame)):
-                self.visualizer.vis(
-                    idx, joint_iter, cur_gt_depth, cur_gt_color, cur_c2w, all_planes, self.decoders)
+                self.visualizer.vis(idx, joint_iter, cur_gt_depth, cur_gt_color, cur_c2w, all_planes, self.decoders)
 
             if self.joint_opt:
-                c2ws_ = torch.cat([c2ws[0:1], pose6d_to_matrix(pose6ds)], dim=0)
+                ## We fix the oldest c2w to avoid drifting
+                c2ws_ = torch.cat([c2ws[0:1], cam_pose_to_matrix(cam_poses)], dim=0)
             else:
                 c2ws_ = c2ws
 
             batch_rays_o, batch_rays_d, batch_gt_depth, batch_gt_color = get_samples(
-                0, H, 0, W, pixs_per_image, H, W, fx, fy, cx, cy, c2ws_, gt_depths, gt_colors, self.device)
-
+                0, H, 0, W, pixs_per_image, H, W, fx, fy, cx, cy, c2ws_, gt_depths, gt_colors, device)
 
             # should pre-filter those out of bounding box depth value
             with torch.no_grad():
-                det_rays_o = batch_rays_o.clone().detach().unsqueeze(-1)  # (N, 3, 1)
-                det_rays_d = batch_rays_d.clone().detach().unsqueeze(-1)  # (N, 3, 1)
+                det_rays_o = batch_rays_o.clone().detach().unsqueeze(-1)
+                det_rays_d = batch_rays_d.clone().detach().unsqueeze(-1)
                 t = (self.bound.unsqueeze(0).to(
                     device)-det_rays_o)/det_rays_d
                 t, _ = torch.min(torch.max(t, dim=2)[0], dim=1)
@@ -333,10 +327,9 @@ class Mapper(object):
             batch_gt_depth = batch_gt_depth[inside_mask]
             batch_gt_color = batch_gt_color[inside_mask]
 
-            ret = self.renderer.render_batch_ray(all_planes, self.decoders, batch_rays_d,
-                                                 batch_rays_o, device, self.truncation,
-                                                 gt_depth=batch_gt_depth)
-            depth, color, sdf, z_vals = ret
+            depth, color, sdf, z_vals = self.renderer.render_batch_ray(all_planes, self.decoders,batch_rays_d,
+                                                                       batch_rays_o, device, self.truncation,
+                                                                       gt_depth=batch_gt_depth)
             depth_mask = (batch_gt_depth > 0)
 
             ## SDF losses
@@ -354,7 +347,7 @@ class Mapper(object):
 
         if self.joint_opt:
             # put the updated camera poses back
-            optimized_c2ws = pose6d_to_matrix(pose6ds.detach())
+            optimized_c2ws = cam_pose_to_matrix(cam_poses.detach())
 
             camera_tensor_id = 0
             for frame in optimize_frame[1:]:
@@ -367,50 +360,63 @@ class Mapper(object):
         return cur_c2w
 
     def run(self):
+        def run(self):
+            """
+            Runs the mapping thread for the input RGB-D frames.
+
+            Args:
+                None
+
+            Returns:
+                None
+        """
         cfg = self.cfg
         all_planes = (self.planes_xy, self.planes_xz, self.planes_yz, self.c_planes_xy, self.c_planes_xz, self.c_planes_yz)
         idx, gt_color, gt_depth, gt_c2w = self.frame_reader[0]
-        data_iter = iter(self.frame_loader)
+        data_iterator = iter(self.frame_loader)
 
+        ## Fixing the first camera pose
         self.estimate_c2w_list[0] = gt_c2w
 
-        init = True
+        init_phase = True
         prev_idx = -1
-        while (1):
+        while True:
             while True:
                 idx = self.idx[0].clone()
-                if idx == self.n_img-1:
+                if idx == self.n_img-1: ## Last input frame
                     break
 
                 if idx % self.every_frame == 0 and idx != prev_idx:
                     break
 
                 time.sleep(0.001)
-            prev_idx = idx
 
-            start_time = time.time()
+            prev_idx = idx
 
             if self.verbose:
                 print(Fore.GREEN)
                 print("Mapping Frame ", idx.item())
                 print(Style.RESET_ALL)
 
-            _, gt_color, gt_depth, gt_c2w = next(data_iter)
-            gt_color, gt_depth, gt_c2w = gt_color.squeeze(0).to(self.device, non_blocking=True), gt_depth.squeeze(0).to(self.device, non_blocking=True), gt_c2w.squeeze(0).to(self.device, non_blocking=True)
+            _, gt_color, gt_depth, gt_c2w = next(data_iterator)
+            gt_color = gt_color.squeeze(0).to(self.device, non_blocking=True)
+            gt_depth = gt_depth.squeeze(0).to(self.device, non_blocking=True)
+            gt_c2w = gt_c2w.squeeze(0).to(self.device, non_blocking=True)
 
             cur_c2w = self.estimate_c2w_list[idx]
 
-            if not init:
+            if not init_phase:
                 lr_factor = cfg['mapping']['lr_factor']
                 iters = cfg['mapping']['iters']
             else:
                 lr_factor = cfg['mapping']['lr_first_factor']
                 iters = cfg['mapping']['iters_first']
 
+            ## Deciding if camera poses should be jointly optimized
             self.joint_opt = (len(self.keyframe_list) > 4) and cfg['mapping']['joint_opt']
 
-            cur_c2w = self.optimize_map(iters, lr_factor, idx, gt_color, gt_depth,
-                                  gt_c2w, self.keyframe_dict, self.keyframe_list, cur_c2w=cur_c2w)
+            cur_c2w = self.optimize_mapping(iters, lr_factor, idx, gt_color, gt_depth, gt_c2w,
+                                            self.keyframe_dict, self.keyframe_list, cur_c2w)
 
             if self.joint_opt:
                 self.estimate_c2w_list[idx] = cur_c2w
@@ -421,17 +427,11 @@ class Mapper(object):
                 self.keyframe_dict.append({'gt_c2w': gt_c2w, 'idx': idx, 'color': gt_color.to(self.keyframe_device),
                                            'depth': gt_depth.to(self.keyframe_device), 'est_c2w': cur_c2w.clone()})
 
-            if self.verbose:
-                print("---Mapping Time: %s seconds ---" % (time.time() - start_time))
+            init_phase = False
+            self.mapping_first_frame[0] = 1     # mapping of first frame is done, can begin tracking
 
-            init = False
-            # mapping of first frame is done, can begin tracking
-            self.mapping_first_frame[0] = 1
-
-            if ((not (idx == 0 and self.no_log_on_first_frame)) and idx % self.ckpt_freq == 0) \
-                    or idx == self.n_img-1:
-                self.logger.log(idx, self.keyframe_dict, self.keyframe_list,
-                                selected_keyframes=None)
+            if ((not (idx == 0 and self.no_log_on_first_frame)) and idx % self.ckpt_freq == 0) or idx == self.n_img-1:
+                self.logger.log(idx, self.keyframe_list)
 
             self.mapping_idx[0] = idx
             self.mapping_cnt[0] += 1
