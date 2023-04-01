@@ -1,3 +1,25 @@
+# ESLAM is a A NeRF-based SLAM system.
+# It utilizes Neural Radiance Fields (NeRF) to perform Simultaneous
+# Localization and Mapping (SLAM) in real-time. This system uses neural
+# rendering techniques to create a 3D map of an environment from a
+# sequence of images and estimates the camera pose simultaneously.
+#
+# Apache License 2.0
+#
+# Copyright (c) 2023 ams-OSRAM AG
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+
+#     http://www.apache.org/licenses/LICENSE-2.0
+
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 import glob
 import os
 
@@ -9,12 +31,10 @@ from src.common import as_intrinsics_matrix
 from torch.utils.data import Dataset, Sampler
 
 class SeqSampler(Sampler):
-    r"""Samples elements sequentially, always in the same order.
-
-    Args:
-        data_source (Dataset): dataset to sample from
     """
+    Sample a sequence of frames from a dataset.
 
+    """
     def __init__(self, n_samples, step, include_last=True):
         self.n_samples = n_samples
         self.step = step
@@ -28,66 +48,8 @@ class SeqSampler(Sampler):
     def __len__(self) -> int:
         return self.n_samples
 
-def readEXR_onlydepth(filename):
-    """
-    Read depth data from EXR image file.
-    Args:
-        filename (str): File path.
-    Returns:
-        Y (numpy.array): Depth buffer in float32 format.
-    """
-    # move the import here since only CoFusion needs these package
-    # sometimes installation of openexr is hard, you can run all other datasets
-    # even without openexr
-    import Imath
-    import OpenEXR as exr
-
-    exrfile = exr.InputFile(filename)
-    header = exrfile.header()
-    dw = header['dataWindow']
-    isize = (dw.max.y - dw.min.y + 1, dw.max.x - dw.min.x + 1)
-
-    channelData = dict()
-
-    for c in header['channels']:
-        C = exrfile.channel(c, Imath.PixelType(Imath.PixelType.FLOAT))
-        C = np.fromstring(C, dtype=np.float32)
-        C = np.reshape(C, isize)
-
-        channelData[c] = C
-
-    Y = None if 'Y' not in header['channels'] else channelData['Y']
-
-    return Y
-
-
 def get_dataset(cfg, args, scale, device='cuda:0'):
     return dataset_dict[cfg['dataset']](cfg, args, scale, device=device)
-
-class RayDataset(Dataset):
-    def __init__(self, cfg, args, h_edge, w_edge, ray_size, device='cuda:0'):
-        super(RayDataset, self).__init__()
-        self.device = device
-        self.h_edge = h_edge
-        self.w_edge = w_edge
-        self.ray_size = ray_size
-
-        self.H, self.W, self.fx, self.fy, self.cx, self.cy = cfg['cam']['H'], cfg['cam'][
-            'W'], cfg['cam']['fx'], cfg['cam']['fy'], cfg['cam']['cx'], cfg['cam']['cy']
-
-
-    def __len__(self):
-        return 100000
-
-    def __getitem__(self, index):
-        u = torch.randint(low=self.w_edge, high=self.W - self.w_edge, size=[self.ray_size])
-        v = torch.randint(low=self.h_edge, high=self.H - self.h_edge, size=[self.ray_size])
-
-        dirs = torch.stack([(u - self.cx) / self.fx, -(v - self.cy) / self.fy, -torch.ones_like(u)], -1)
-        dirs = dirs.reshape(-1, 1, 3)
-
-        return u.to(self.device, non_blocking=True), v.to(self.device, non_blocking=True), dirs.to(self.device, non_blocking=True)
-
 
 class BaseDataset(Dataset):
     def __init__(self, cfg, args, scale, device='cuda:0'
@@ -119,10 +81,7 @@ class BaseDataset(Dataset):
         color_path = self.color_paths[index]
         depth_path = self.depth_paths[index]
         color_data = cv2.imread(color_path)
-        if '.png' in depth_path:
-            depth_data = cv2.imread(depth_path, cv2.IMREAD_UNCHANGED)
-        elif '.exr' in depth_path:
-            depth_data = readEXR_onlydepth(depth_path)
+        depth_data = cv2.imread(depth_path, cv2.IMREAD_UNCHANGED)
         if self.distortion is not None:
             K = as_intrinsics_matrix([self.fx, self.fy, self.cx, self.cy])
             # undistortion is only applied on color image, not depth!
@@ -135,13 +94,6 @@ class BaseDataset(Dataset):
         color_data = cv2.resize(color_data, (W, H))
         color_data = torch.from_numpy(color_data)
         depth_data = torch.from_numpy(depth_data)*self.scale
-
-        ########################################
-        # depth_shape = depth_data.shape
-        # depth_data = F.interpolate(depth_data[None, None], scale_factor=0.1, mode='bilinear')[0, 0]
-        # depth_data = F.interpolate(depth_data[None, None], size=depth_shape, mode='bilinear')[0, 0]
-
-        ########################################
 
         if self.crop_size is not None:
             # follow the pre-processing step in lietorch, actually is resize
@@ -186,48 +138,6 @@ class Replica(BaseDataset):
             c2w = torch.from_numpy(c2w).float()
             self.poses.append(c2w)
 
-
-class Azure(BaseDataset):
-    def __init__(self, cfg, args, scale, device='cuda:0'
-                 ):
-        super(Azure, self).__init__(cfg, args, scale, device)
-        self.color_paths = sorted(
-            glob.glob(os.path.join(self.input_folder, 'color', '*.jpg')))
-        self.depth_paths = sorted(
-            glob.glob(os.path.join(self.input_folder, 'depth', '*.png')))
-        self.n_img = len(self.color_paths)
-        self.load_poses(os.path.join(
-            self.input_folder, 'scene', 'trajectory.log'))
-
-    def load_poses(self, path):
-        self.poses = []
-        if os.path.exists(path):
-            with open(path) as f:
-                content = f.readlines()
-
-                # Load .log file.
-                for i in range(0, len(content), 5):
-                    # format %d (src) %d (tgt) %f (fitness)
-                    data = list(map(float, content[i].strip().split(' ')))
-                    ids = (int(data[0]), int(data[1]))
-                    fitness = data[2]
-
-                    # format %f x 16
-                    c2w = np.array(
-                        list(map(float, (''.join(
-                            content[i + 1:i + 5])).strip().split()))).reshape((4, 4))
-
-                    c2w[:3, 1] *= -1
-                    c2w[:3, 2] *= -1
-                    c2w = torch.from_numpy(c2w).float()
-                    self.poses.append(c2w)
-        else:
-            for i in range(self.n_img):
-                c2w = np.eye(4)
-                c2w = torch.from_numpy(c2w).float()
-                self.poses.append(c2w)
-
-
 class ScanNet(BaseDataset):
     def __init__(self, cfg, args, scale, device='cuda:0'
                  ):
@@ -256,30 +166,6 @@ class ScanNet(BaseDataset):
             c2w[:3, 2] *= -1
             c2w = torch.from_numpy(c2w).float()
             self.poses.append(c2w)
-
-
-class CoFusion(BaseDataset):
-    def __init__(self, cfg, args, scale, device='cuda:0'
-                 ):
-        super(CoFusion, self).__init__(cfg, args, scale, device)
-        self.input_folder = os.path.join(self.input_folder)
-        self.color_paths = sorted(
-            glob.glob(os.path.join(self.input_folder, 'colour', '*.png')))
-        self.depth_paths = sorted(glob.glob(os.path.join(
-            self.input_folder, 'depth_noise', '*.exr')))
-        self.n_img = len(self.color_paths)
-        self.load_poses(os.path.join(self.input_folder, 'trajectories'))
-
-    def load_poses(self, path):
-        # We tried, but cannot align the coordinate frame of cofusion to ours.
-        # So here we provide identity matrix as proxy.
-        # But it will not affect the calculation of ATE since camera trajectories can be aligned.
-        self.poses = []
-        for i in range(self.n_img):
-            c2w = np.eye(4)
-            c2w = torch.from_numpy(c2w).float()
-            self.poses.append(c2w)
-
 
 class TUM_RGBD(BaseDataset):
     def __init__(self, cfg, args, scale, device='cuda:0'
@@ -374,7 +260,5 @@ class TUM_RGBD(BaseDataset):
 dataset_dict = {
     "replica": Replica,
     "scannet": ScanNet,
-    "cofusion": CoFusion,
-    "azure": Azure,
     "tumrgbd": TUM_RGBD
 }

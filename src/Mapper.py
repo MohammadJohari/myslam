@@ -31,7 +31,7 @@ from colorama import Fore, Style
 
 from src.common import (get_samples, random_select, matrix_to_cam_pose, cam_pose_to_matrix)
 from src.utils.datasets import get_dataset, SeqSampler
-from src.utils.Visualizer import Visualizer
+from src.utils.Frame_Visualizer import Frame_Visualizer
 from src.tools.cull_mesh import cull_mesh
 
 class Mapper(object):
@@ -97,9 +97,9 @@ class Mapper(object):
         self.frame_loader = DataLoader(self.frame_reader, batch_size=1, num_workers=1, pin_memory=True,
                                        prefetch_factor=2, sampler=SeqSampler(self.n_img, self.every_frame))
 
-        self.visualizer = Visualizer(freq=cfg['mapping']['vis_freq'], inside_freq=cfg['mapping']['vis_inside_freq'],
-                                     vis_dir=os.path.join(self.output, 'mapping_vis'), renderer=self.renderer,
-                                     truncation=self.truncation, verbose=self.verbose, device=self.device)
+        self.visualizer = Frame_Visualizer(freq=cfg['mapping']['vis_freq'], inside_freq=cfg['mapping']['vis_inside_freq'],
+                                           vis_dir=os.path.join(self.output, 'mapping_vis'), renderer=self.renderer,
+                                           truncation=self.truncation, verbose=self.verbose, device=self.device)
 
         self.H, self.W, self.fx, self.fy, self.cx, self.cy = slam.H, slam.W, slam.fx, slam.fy, slam.cx, slam.cy
 
@@ -303,7 +303,7 @@ class Mapper(object):
 
         for joint_iter in range(iters):
             if (not (idx == 0 and self.no_vis_on_first_frame)):
-                self.visualizer.vis(idx, joint_iter, cur_gt_depth, cur_gt_color, cur_c2w, all_planes, self.decoders)
+                self.visualizer.save_imgs(idx, joint_iter, cur_gt_depth, cur_gt_color, cur_c2w, all_planes, self.decoders)
 
             if self.joint_opt:
                 ## We fix the oldest c2w to avoid drifting

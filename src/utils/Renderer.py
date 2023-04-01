@@ -1,8 +1,33 @@
+# ESLAM is a A NeRF-based SLAM system.
+# It utilizes Neural Radiance Fields (NeRF) to perform Simultaneous
+# Localization and Mapping (SLAM) in real-time. This system uses neural
+# rendering techniques to create a 3D map of an environment from a
+# sequence of images and estimates the camera pose simultaneously.
+#
+# Apache License 2.0
+#
+# Copyright (c) 2023 ams-OSRAM AG
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+
+#     http://www.apache.org/licenses/LICENSE-2.0
+
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 import torch
 from src.common import get_rays, sample_pdf, normalize_3d_coordinate
 
 class Renderer(object):
-    def __init__(self, cfg, args, slam, points_batch_size=500000, ray_batch_size=10000):
+    """
+    Renderer class for rendering depth and color.
+    """
+    def __init__(self, cfg, slam, points_batch_size=500000, ray_batch_size=10000):
         self.ray_batch_size = ray_batch_size
         self.points_batch_size = points_batch_size
 
@@ -16,6 +41,13 @@ class Renderer(object):
         self.H, self.W, self.fx, self.fy, self.cx, self.cy = slam.H, slam.W, slam.fx, slam.fy, slam.cx, slam.cy
 
     def perturbation(self, z_vals):
+        """
+        Add perturbation to sampled depth values on the rays.
+        Args:
+            z_vals (tensor): sampled depth values on the rays.
+        Returns:
+            z_vals (tensor): perturbed depth values on the rays.
+        """
         # get intervals between samples
         mids = 0.5 * (z_vals[..., 1:] + z_vals[..., :-1])
         upper = torch.cat([mids, z_vals[..., -1:]], -1)
@@ -27,20 +59,21 @@ class Renderer(object):
 
     def render_batch_ray(self, all_planes, decoders, rays_d, rays_o, device, truncation, gt_depth=None):
         """
-        Render color, depth and uncertainty of a batch of rays.
-
+        Render depth and color for a batch of rays.
         Args:
-            c (dict): feature grids.
-            decoders (nn.module): decoders.
-            rays_d (tensor, N*3): rays direction.
-            rays_o (tensor, N*3): rays origin.
-            device (str): device name to compute on.
-            gt_depth (tensor, optional): sensor depth image. Defaults to None.
-
+            all_planes (Tuple): all feature planes.
+            decoders (torch.nn.Module): decoders for TSDF and color.
+            rays_d (tensor): ray directions.
+            rays_o (tensor): ray origins.
+            device (torch.device): device to run on.
+            truncation (float): truncation threshold.
+            gt_depth (tensor): ground truth depth.
         Returns:
-            depth (tensor): rendered depth.
-            uncertainty (tensor): rendered uncertainty.
-            color (tensor): rendered color.
+            depth_map (tensor): depth map.
+            color_map (tensor): color map.
+            volume_densities (tensor): volume densities for sampled points.
+            z_vals (tensor): sampled depth values on the rays.
+
         """
         n_stratified = self.n_stratified
         n_importance = self.n_importance
@@ -56,6 +89,7 @@ class Renderer(object):
         gt_mask = (gt_depth > 0).squeeze()
         gt_nonezero = gt_depth[gt_mask]
 
+        ## Sampling points around the gt depth (surface)
         gt_depth_surface = gt_nonezero.expand(-1, n_importance)
         z_vals_surface = gt_depth_surface - (1.5 * truncation)  + (3 * truncation * t_vals_surface)
 
@@ -67,7 +101,7 @@ class Renderer(object):
             z_vals_nonzero = self.perturbation(z_vals_nonzero)
         z_vals[gt_mask] = z_vals_nonzero
 
-        ### pixels without gt depth:
+        ### pixels without gt depth (importance sampling):
         if not gt_mask.all():
             with torch.no_grad():
                 rays_o_uni = rays_o[~gt_mask].detach()
@@ -99,7 +133,7 @@ class Renderer(object):
         pts = rays_o[..., None, :] + rays_d[..., None, :] * \
               z_vals[..., :, None]  # [n_rays, n_stratified+n_importance, 3]
 
-        raw = decoders.get_raw(pts, all_planes)
+        raw = decoders(pts, all_planes)
         alpha = self.sdf2alpha(raw[..., -1], decoders.beta)
         weights = alpha * torch.cumprod(torch.cat([torch.ones((alpha.shape[0], 1), device=device)
                                                 , (1. - alpha + 1e-10)], -1), -1)[:, :-1]
@@ -110,29 +144,30 @@ class Renderer(object):
         return rendered_depth, rendered_rgb, raw[..., -1], z_vals
 
     def sdf2alpha(self, sdf, beta=10):
+        """
+
+        """
         return 1. - torch.exp(-beta * torch.sigmoid(-sdf * beta))
 
     def render_img(self, all_planes, decoders, c2w, truncation, device, gt_depth=None):
         """
-        Renders out depth, uncertainty, and color images.
-
+        Renders out depth and color images.
         Args:
-            c (dict): feature grids.
-            decoders (nn.module): decoders.
-            c2w (tensor): camera to world matrix of current frame.
-            device (str): device name to compute on.
-            gt_depth (tensor, optional): sensor depth image. Defaults to None.
-
+            all_planes (Tuple): feature planes
+            decoders (torch.nn.Module): decoders for TSDF and color.
+            c2w (tensor, 4*4): camera pose.
+            truncation (float): truncation distance.
+            device (torch.device): device to run on.
+            gt_depth (tensor, H*W): ground truth depth image.
         Returns:
-            depth (tensor, H*W): rendered depth image.
-            uncertainty (tensor, H*W): rendered uncertainty image.
-            color (tensor, H*W*3): rendered color image.
+            rendered_depth (tensor, H*W): rendered depth image.
+            rendered_rgb (tensor, H*W*3): rendered color image.
+
         """
         with torch.no_grad():
             H = self.H
             W = self.W
-            rays_o, rays_d = get_rays(
-                H, W, self.fx, self.fy, self.cx, self.cy,  c2w, device)
+            rays_o, rays_d = get_rays(H, W, self.fx, self.fy, self.cx, self.cy,  c2w, device)
             rays_o = rays_o.reshape(-1, 3)
             rays_d = rays_d.reshape(-1, 3)
 
@@ -146,14 +181,12 @@ class Renderer(object):
                 rays_d_batch = rays_d[i:i+ray_batch_size]
                 rays_o_batch = rays_o[i:i+ray_batch_size]
                 if gt_depth is None:
-                    ret = self.render_batch_ray(all_planes, decoders, rays_d_batch,
-                                                rays_o_batch, device, truncation,
-                                                gt_depth=None)
+                    ret = self.render_batch_ray(all_planes, decoders, rays_d_batch, rays_o_batch,
+                                                device, truncation, gt_depth=None)
                 else:
                     gt_depth_batch = gt_depth[i:i+ray_batch_size]
-                    ret = self.render_batch_ray(all_planes, decoders, rays_d_batch,
-                                                rays_o_batch, device, truncation,
-                                                gt_depth=gt_depth_batch)
+                    ret = self.render_batch_ray(all_planes, decoders, rays_d_batch, rays_o_batch,
+                                                device, truncation, gt_depth=gt_depth_batch)
 
                 depth, color, _, _ = ret
                 depth_list.append(depth.double())

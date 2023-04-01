@@ -1,15 +1,37 @@
+# ESLAM is a A NeRF-based SLAM system.
+# It utilizes Neural Radiance Fields (NeRF) to perform Simultaneous
+# Localization and Mapping (SLAM) in real-time. This system uses neural
+# rendering techniques to create a 3D map of an environment from a
+# sequence of images and estimates the camera pose simultaneously.
+#
+# Apache License 2.0
+#
+# Copyright (c) 2023 ams-OSRAM AG
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+
+#     http://www.apache.org/licenses/LICENSE-2.0
+
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 import numpy as np
 import open3d as o3d
 import skimage
 import torch
-import torch.nn.functional as F
 import trimesh
 from packaging import version
 from src.utils.datasets import get_dataset
 
-
 class Mesher(object):
-
+    """
+    Mesher class.
+    """
     def __init__(self, cfg, args, slam, points_batch_size=500000, ray_batch_size=100000):
         self.points_batch_size = points_batch_size
         self.ray_batch_size = ray_batch_size
@@ -101,15 +123,12 @@ class Mesher(object):
     def eval_points(self, p, all_planes, decoders):
         """
         Evaluates the TSDF and/or color value for the points.
-
         Args:
-            p (tensor, N*3): point coordinates.
-            decoders (nn.module decoders): decoders.
-            c (dicts, optional): feature grids. Defaults to None.
-            device (str, optional): device name to compute on. Defaults to 'cuda:0'.
-
+            p (torch.Tensor): points to be evaluated, shape (N, 3).
+            all_planes (Tuple): all feature planes.
+            decoders (torch.nn.Module): decoders for TSDF and color.
         Returns:
-            ret (tensor): TSDF (and color) value of input points.
+            ret (torch.Tensor): the evaluation result, shape (N, 4).
         """
 
         p_split = torch.split(p, self.points_batch_size)
@@ -122,7 +141,7 @@ class Mesher(object):
             mask_z = (pi[:, 2] < bound[2][1]) & (pi[:, 2] > bound[2][0])
             mask = mask_x & mask_y & mask_z
 
-            ret = decoders.get_raw(pi, all_planes=all_planes)
+            ret = decoders(pi, all_planes=all_planes)
 
             ret[~mask, -1] = -1
             rets.append(ret)
@@ -152,12 +171,6 @@ class Mesher(object):
         
         nsteps_z = ((bound[2][1] - bound[2][0] + 2 * padding) / resolution).round().int().item()
         z = np.linspace(bound[2][0] - padding, bound[2][1] + padding, nsteps_z)
-        
-        # xx, yy, zz = np.meshgrid(x, y, z)
-        # xx, yy, zz = xx.astype(np.float32), yy.astype(np.float32), zz.astype(np.float32)
-        # grid_points = torch.tensor(np.vstack(
-        #     [xx.ravel(), yy.ravel(), zz.ravel()]).T,
-        #     dtype=torch.float)
 
         x_t, y_t, z_t = torch.from_numpy(x).float(), torch.from_numpy(y).float(), torch.from_numpy(z).float()
         grid_x, grid_y, grid_z = torch.meshgrid(x_t, y_t, z_t, indexing='xy')
@@ -165,13 +178,20 @@ class Mesher(object):
 
         return {"grid_points": grid_points_t, "xyz": [x, y, z]}
 
-    def get_mesh(self,
-                 mesh_out_file,
-                 all_planes,
-                 decoders,
-                 keyframe_dict,
-                 device='cuda:0',
-                 color=True):
+    def get_mesh(self, mesh_out_file, all_planes, decoders, keyframe_dict, device='cuda:0', color=True):
+        """
+        Get mesh from keyframes and feature planes and save to file.
+        Args:
+            mesh_out_file (str): output mesh file.
+            all_planes (Tuple): all feature planes.
+            decoders (torch.nn.Module): decoders for TSDF and color.
+            keyframe_dict (dict): keyframe dictionary.
+            device (str): device to run the model.
+            color (bool): whether to use color.
+        Returns:
+            None
+
+        """
 
         with torch.no_grad():
             grid = self.get_grid_uniform(self.resolution)
@@ -183,9 +203,9 @@ class Mesher(object):
             for i, pnts in enumerate(torch.split(points, self.points_batch_size, dim=0)):
                 mask.append(mesh_bound.contains(pnts.cpu().numpy()))
             mask = np.concatenate(mask, axis=0)
+
             for i, pnts in enumerate(torch.split(points, self.points_batch_size, dim=0)):
                 z.append(self.eval_points(pnts.to(device), all_planes, decoders).cpu().numpy()[:, -1])
-
             z = np.concatenate(z, axis=0)
             z[~mask] = -1
 
@@ -212,21 +232,17 @@ class Mesher(object):
                                  grid['xyz'][1][2] - grid['xyz'][1][1],
                                  grid['xyz'][2][2] - grid['xyz'][2][1]))
             except:
-                print(
-                    'marching_cubes error. Possibly no surface extracted from the level set.'
-                )
+                print('marching_cubes error. Possibly no surface extracted from the level set.')
                 return
 
             # convert back to world coordinates
-            vertices = verts + np.array(
-                [grid['xyz'][0][0], grid['xyz'][1][0], grid['xyz'][2][0]])
+            vertices = verts + np.array([grid['xyz'][0][0], grid['xyz'][1][0], grid['xyz'][2][0]])
 
             if color:
                 # color is extracted by passing the coordinates of mesh vertices through the network
                 points = torch.from_numpy(vertices)
                 z = []
-                for i, pnts in enumerate(
-                        torch.split(points, self.points_batch_size, dim=0)):
+                for i, pnts in enumerate(torch.split(points, self.points_batch_size, dim=0)):
                     z_color = self.eval_points(pnts.to(device).float(), all_planes, decoders).cpu()[..., :3]
                     z.append(z_color)
                 z = torch.cat(z, dim=0)

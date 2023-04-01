@@ -20,20 +20,18 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import numpy as np
+import torch
+
 import argparse
 import os
 import time
-
-import numpy as np
-import torch
-import cv2
+import glob
 import trimesh
 from tqdm import tqdm
-from torch.utils.data import DataLoader
 
 from src import config
-from src.tools.viz import SLAMFrontend
-from src.utils.datasets import get_dataset
+from src.tools.visualizer_util import SLAMFrontend
 
 if __name__ == '__main__':
 
@@ -46,23 +44,21 @@ if __name__ == '__main__':
     parser.add_argument('--output', type=str,
                         help='output folder, this have higher priority, can overwrite the one inconfig file')
     parser.add_argument('--save_rendering',
-                        action='store_true', help='save rendering video to `vis.mp4` in output folder ')
-    parser.add_argument('--vis_input_frame',
-                        action='store_true', help='visualize input frames')
+                        action='store_true', help='save rendering video to `save_imgs.mp4` in output folder ')
     parser.add_argument('--no_gt_traj',
                         action='store_true', help='not visualize gt trajectory')
     args = parser.parse_args()
     cfg = config.load_config(args.config, 'configs/ESLAM.yaml')
     scale = cfg['scale']
+    mesh_resolution = cfg['meshing']['resolution']
+    if mesh_resolution <= 0.01:
+        wait_time = 0.25
+    else:
+        wait_time = 0.1
     output = cfg['data']['output'] if args.output is None else args.output
-    if args.vis_input_frame:
-        frame_reader = get_dataset(cfg, args, scale, device='cpu')
-        frame_loader = DataLoader(
-            frame_reader, batch_size=1, shuffle=False, num_workers=4)
     ckptsdir = f'{output}/ckpts'
     if os.path.exists(ckptsdir):
-        ckpts = [os.path.join(ckptsdir, f)
-                 for f in sorted(os.listdir(ckptsdir)) if 'tar' in f]
+        ckpts = [os.path.join(ckptsdir, f) for f in sorted(os.listdir(ckptsdir)) if 'tar' in f]
         if len(ckpts) > 0:
             ckpt_path = ckpts[-1]
             print('Get ckpt :', ckpt_path)
@@ -70,62 +66,42 @@ if __name__ == '__main__':
             estimate_c2w_list = ckpt['estimate_c2w_list']
             gt_c2w_list = ckpt['gt_c2w_list']
             N = ckpt['idx']
-    estimate_c2w_list[:, :3, 3] /= scale
-    gt_c2w_list[:, :3, 3] /= scale
-    estimate_c2w_list = estimate_c2w_list.cpu().numpy()
-    gt_c2w_list = gt_c2w_list.cpu().numpy()
+            estimate_c2w_list[:, :3, 3] /= scale
+            gt_c2w_list[:, :3, 3] /= scale
+            estimate_c2w_list = estimate_c2w_list.cpu().numpy()
+            gt_c2w_list = gt_c2w_list.cpu().numpy()
 
-    # ## Setting view point
-    meshfile = f'{output}/mesh/final_mesh_eval_rec.ply'
-    if os.path.isfile(meshfile):
-        mesh = trimesh.load(meshfile, process=False)
-        to_origin, _ = trimesh.bounds.oriented_bounds(mesh, ordered=False)
-        init_pose = np.eye(4)
-        init_pose = np.linalg.inv(to_origin) @ init_pose
+            ## Setting view point ##
+            # get the latest .ply file in the "mesh" folder and use it to set the view point
+            meshfile = sorted(glob.glob(f'{output}/mesh/*.ply'))[-1]
+            if os.path.isfile(meshfile):
+                mesh = trimesh.load(meshfile, process=False)
+                to_origin, _ = trimesh.bounds.oriented_bounds(mesh, ordered=False)
+                init_pose = np.eye(4)
+                init_pose = np.linalg.inv(to_origin) @ init_pose
 
-    frontend = SLAMFrontend(output, init_pose=init_pose, cam_scale=0.3,
-                            save_rendering=args.save_rendering, near=0,
-                            estimate_c2w_list=estimate_c2w_list, gt_c2w_list=gt_c2w_list)
-    frontend.start()
+                frontend = SLAMFrontend(output, init_pose=init_pose, cam_scale=0.25,
+                                        save_rendering=args.save_rendering, near=0,
+                                        estimate_c2w_list=estimate_c2w_list, gt_c2w_list=gt_c2w_list)
+                frontend.start()
 
-    ## Simple Image
-    # meshfile = f'{output}/mesh/final_mesh_eval_rec.ply'
-    # frontend.update_mesh(meshfile)
-    # frontend.update_cam_trajectory(len(estimate_c2w_list), gt=False)
-    # frontend.update_cam_trajectory(len(estimate_c2w_list), gt=True)
+                ## Visualize the trajectory ##
+                for i in tqdm(range(0, N+1)):
+                    meshfile = f'{output}/mesh/{i:05d}_mesh_culled.ply'
+                    if os.path.isfile(meshfile):
+                        frontend.update_mesh(meshfile)
+                    frontend.update_pose(1, estimate_c2w_list[i], gt=False)
+                    if not args.no_gt_traj:
+                        frontend.update_pose(1, gt_c2w_list[i], gt=True)
+                    if i % 10 == 0:
+                        frontend.update_cam_trajectory(i, gt=False)
+                        if not args.no_gt_traj:
+                            frontend.update_cam_trajectory(i, gt=True)
+                    time.sleep(wait_time)
 
-    ##### Video
-    for i in tqdm(range(0, N+1)):
-        # show every second frame for speed up
-        if args.vis_input_frame and i % 2 == 0:
-            idx, gt_color, gt_depth, gt_c2w = frame_reader[i]
-            depth_np = gt_depth.numpy()
-            color_np = (gt_color.numpy()*255).astype(np.uint8)
-            depth_np = depth_np/np.max(depth_np)*255
-            depth_np = np.clip(depth_np, 0, 255).astype(np.uint8)
-            depth_np = cv2.applyColorMap(depth_np, cv2.COLORMAP_JET)
-            color_np = np.clip(color_np, 0, 255)
-            whole = np.concatenate([color_np, depth_np], axis=0)
-            H, W, _ = whole.shape
-            whole = cv2.resize(whole, (W//4, H//4))
-            cv2.imshow(f'Input RGB-D Sequence', whole[:, :, ::-1])
-            cv2.waitKey(1)
-        meshfile = f'{output}/mesh/{i:05d}_mesh.ply'
-        if os.path.isfile(meshfile):
-            frontend.update_mesh(meshfile)
-        frontend.update_pose(1, estimate_c2w_list[i], gt=False)
-        if not args.no_gt_traj:
-            frontend.update_pose(1, gt_c2w_list[i], gt=True)
-        if i % 10 == 0:
-            frontend.update_cam_trajectory(i, gt=False)
-            if not args.no_gt_traj:
-                frontend.update_cam_trajectory(i, gt=True)
-        time.sleep(0.5)
+                time.sleep(1)
+                frontend.terminate()
 
-    time.sleep(1)
-    frontend.terminate()
-
-    if args.save_rendering:
-        time.sleep(1)
-        os.system(
-            f"/usr/bin/ffmpeg -f image2 -r 30 -pattern_type glob -i '{output}/tmp_rendering/*.jpg' -y {output}/vis.mp4")
+                if args.save_rendering:
+                    time.sleep(1)
+                    os.system(f"/usr/bin/ffmpeg -f image2 -r 30 -pattern_type glob -i '{output}/tmp_rendering/*.jpg' -y {output}/save_imgs.mp4")

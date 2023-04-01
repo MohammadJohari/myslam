@@ -114,9 +114,9 @@ class ESLAM():
         self.shared_decoders = self.shared_decoders.to(self.device)
         self.shared_decoders.share_memory()
 
-        self.renderer = Renderer(cfg, args, self)
+        self.renderer = Renderer(cfg, self)
         self.mesher = Mesher(cfg, args, self)
-        self.logger = Logger(cfg, args, self)
+        self.logger = Logger(self)
         self.mapper = Mapper(cfg, args, self)
         self.tracker = Tracker(cfg, args, self)
         self.print_output_desc()

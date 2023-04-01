@@ -1,4 +1,10 @@
-<h1 align="center">ESLAM: Efficient Dense SLAM System Based on Hybrid Representation of Signed Distance Fields</h1>
+<h1 align="center">
+[CVPR 2023 Highlight]
+
+ESLAM: Efficient Dense SLAM System Based on Hybrid Representation of Signed Distance Fields
+
+[Project Page](https://www.idiap.ch/paper/eslam/) | [Paper](https://arxiv.org/abs/2211.11704)
+</h1>
 
 <br>
 

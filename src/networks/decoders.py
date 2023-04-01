@@ -26,6 +26,16 @@ import torch.nn.functional as F
 from src.common import normalize_3d_coordinate
 
 class Decoders(nn.Module):
+    """
+    Decoders for SDF and RGB.
+    Args:
+        c_dim: feature dimensions
+        hidden_size: hidden size of MLP
+        truncation: truncation of SDF
+        n_blocks: number of MLP blocks
+        learnable_beta: whether to learn beta
+
+    """
     def __init__(self, c_dim=32, hidden_size=16, truncation=0.08, n_blocks=2, learnable_beta=True):
         super().__init__()
 
@@ -33,10 +43,12 @@ class Decoders(nn.Module):
         self.truncation = truncation
         self.n_blocks = n_blocks
 
+        ## layers for SDF decoder
         self.linears = nn.ModuleList(
             [nn.Linear(2 * c_dim, hidden_size)] +
             [nn.Linear(hidden_size, hidden_size) for i in range(n_blocks - 1)])
 
+        ## layers for RGB decoder
         self.c_linears = nn.ModuleList(
             [nn.Linear(2 * c_dim, hidden_size)] +
             [nn.Linear(hidden_size, hidden_size)  for i in range(n_blocks - 1)])
@@ -49,7 +61,17 @@ class Decoders(nn.Module):
         else:
             self.beta = 10
 
-    def sample_plane_feature(self, p_nor, planes_xy, planes_xz, planes_yz, act=True):
+    def sample_plane_feature(self, p_nor, planes_xy, planes_xz, planes_yz):
+        """
+        Sample feature from planes
+        Args:
+            p_nor (tensor): normalized 3D coordinates
+            planes_xy (list): xy planes
+            planes_xz (list): xz planes
+            planes_yz (list): yz planes
+        Returns:
+            feat (tensor): sampled features
+        """
         vgrid = p_nor[None, :, None]
 
         feat = []
@@ -57,18 +79,23 @@ class Decoders(nn.Module):
             xy = F.grid_sample(planes_xy[i], vgrid[..., [0, 1]], padding_mode='border', align_corners=True, mode='bilinear').squeeze().transpose(0, 1)
             xz = F.grid_sample(planes_xz[i], vgrid[..., [0, 2]], padding_mode='border', align_corners=True, mode='bilinear').squeeze().transpose(0, 1)
             yz = F.grid_sample(planes_yz[i], vgrid[..., [1, 2]], padding_mode='border', align_corners=True, mode='bilinear').squeeze().transpose(0, 1)
-            if act:
-                # feat.append(F.relu(xy + xz + yz, inplace=True))
-                feat.append(xy + xz + yz)
-            else:
-                feat.append(xy + xz + yz)
+            feat.append(xy + xz + yz)
         feat = torch.cat(feat, dim=-1)
 
         return feat
 
     def get_raw_sdf(self, p_nor, all_planes):
+        """
+        Get raw SDF
+        Args:
+            p_nor (tensor): normalized 3D coordinates
+            all_planes (Tuple): all feature planes
+        Returns:
+            sdf (tensor): raw SDF
+        """
         planes_xy, planes_xz, planes_yz, c_planes_xy, c_planes_xz, c_planes_yz = all_planes
-        feat = self.sample_plane_feature(p_nor, planes_xy, planes_xz, planes_yz, act=True)
+        feat = self.sample_plane_feature(p_nor, planes_xy, planes_xz, planes_yz)
+
         h = feat
         for i, l in enumerate(self.linears):
             h = self.linears[i](h)
@@ -78,8 +105,17 @@ class Decoders(nn.Module):
         return sdf
 
     def get_raw_rgb(self, p_nor, all_planes):
+        """
+        Get raw RGB
+        Args:
+            p_nor (tensor): normalized 3D coordinates
+            all_planes (Tuple): all feature planes
+        Returns:
+            rgb (tensor): raw RGB
+        """
         planes_xy, planes_xz, planes_yz, c_planes_xy, c_planes_xz, c_planes_yz = all_planes
-        c_feat = self.sample_plane_feature(p_nor, c_planes_xy, c_planes_xz, c_planes_yz, act=True)
+        c_feat = self.sample_plane_feature(p_nor, c_planes_xy, c_planes_xz, c_planes_yz)
+
         h = c_feat
         for i, l in enumerate(self.c_linears):
             h = self.c_linears[i](h)
@@ -88,7 +124,15 @@ class Decoders(nn.Module):
 
         return rgb
 
-    def get_raw(self, p, all_planes):
+    def forward(self, p, all_planes):
+        """
+        Forward pass
+        Args:
+            p (tensor): 3D coordinates
+            all_planes (Tuple): all feature planes
+        Returns:
+            raw (tensor): raw SDF and RGB
+        """
         p_shape = p.shape
 
         p_nor = normalize_3d_coordinate(p.clone(), self.bound)

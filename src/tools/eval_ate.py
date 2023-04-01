@@ -25,10 +25,10 @@ import os
 import numpy
 import torch
 import sys
-import numpy as np
+
 sys.path.append('.')
 from src import config
-from src.common import get_tensor_from_camera
+from src.common import matrix_to_cam_pose
 
 def associate(first_list, second_list, offset=0.0, max_difference=0.02):
     """
@@ -274,8 +274,10 @@ def convert_poses(c2w_list, N, scale, gt=True):
                 mask[idx] = 0
                 continue
         c2w_list[idx][:3, 3] /= scale
-        poses.append(get_tensor_from_camera(c2w_list[idx], Tquad=True))
-    poses = torch.stack(poses)
+        poses.append(matrix_to_cam_pose(c2w_list[idx].unsqueeze(0), RT=False))
+
+    poses = torch.cat(poses, dim=0)
+
     return poses, mask
 
 
@@ -295,7 +297,6 @@ if __name__ == '__main__':
     cfg = config.load_config(args.config, 'configs/ESLAM.yaml')
     scale = cfg['scale']
     output = cfg['data']['output'] if args.output is None else args.output
-    cofusion = ('cofusion' in args.config) or ('CoFusion' in args.config)
     ckptsdir = f'{output}/ckpts'
     if os.path.exists(ckptsdir):
         ckpts = [os.path.join(ckptsdir, f)
@@ -307,13 +308,7 @@ if __name__ == '__main__':
             estimate_c2w_list = ckpt['estimate_c2w_list']
             gt_c2w_list = ckpt['gt_c2w_list']
             N = ckpt['idx']
-            if cofusion:
-                poses_gt = np.loadtxt(
-                    'Datasets/CoFusion/room4/trajectories/gt-cam-0.txt')
-                poses_gt = torch.from_numpy(poses_gt[:, 1:])
-            else:
-                poses_gt, mask = convert_poses(gt_c2w_list, N, scale)
+            poses_gt, mask = convert_poses(gt_c2w_list, N, scale)
             poses_est, _ = convert_poses(estimate_c2w_list, N, scale)
             poses_est = poses_est[mask]
-            evaluate(poses_gt, poses_est,
-                     plot=f'{output}/eval_ate_plot.png')
+            evaluate(poses_gt, poses_est, plot=f'{output}/eval_ate_plot.png')

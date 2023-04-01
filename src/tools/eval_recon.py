@@ -85,7 +85,7 @@ def check_proj(points, W, H, fx, fy, cx, cy, c2w):
     return mask.sum() > 0
 
 
-def calc_3d_metric(rec_meshfile, gt_meshfile, align=True):
+def calc_3d_metric(rec_meshfile, gt_meshfile, align=True, num_points=450000):
     """
     3D reconstruction metric.
 
@@ -97,9 +97,9 @@ def calc_3d_metric(rec_meshfile, gt_meshfile, align=True):
         transformation = get_align_transformation(rec_meshfile, gt_meshfile)
         mesh_rec = mesh_rec.apply_transform(transformation)
 
-    rec_pc = trimesh.sample.sample_surface(mesh_rec, 450000)
+    rec_pc = trimesh.sample.sample_surface(mesh_rec, num_points)
     rec_pc_tri = trimesh.PointCloud(vertices=rec_pc[0])
-    gt_pc = trimesh.sample.sample_surface(mesh_gt, 450000)
+    gt_pc = trimesh.sample.sample_surface(mesh_gt, num_points)
     gt_pc_tri = trimesh.PointCloud(vertices=gt_pc[0])
     accuracy_rec = accuracy(gt_pc_tri.vertices, rec_pc_tri.vertices)
     completion_rec = completion(gt_pc_tri.vertices, rec_pc_tri.vertices)

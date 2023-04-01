@@ -28,10 +28,8 @@ import numpy as np
 import open3d as o3d
 import torch
 
-
 def normalize(x):
     return x / np.linalg.norm(x)
-
 
 def create_camera_actor(i, is_gt=False, scale=0.005):
     cam_points = scale * np.array([
@@ -66,7 +64,9 @@ def create_camera_actor(i, is_gt=False, scale=0.005):
 
 def draw_trajectory(queue, output, init_pose, cam_scale,
                     save_rendering, near, estimate_c2w_list, gt_c2w_list):
+    """
 
+    """
     draw_trajectory.queue = queue
     draw_trajectory.cameras = {}
     draw_trajectory.points = {}

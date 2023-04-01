@@ -22,9 +22,7 @@
 
 import numpy as np
 import torch
-import torch.nn.functional as F
-from pytorch3d.transforms import matrix_to_quaternion, quaternion_to_axis_angle, quaternion_to_matrix
-
+from pytorch3d.transforms import matrix_to_quaternion, quaternion_to_matrix
 
 def as_intrinsics_matrix(intrinsics):
     """
@@ -36,13 +34,13 @@ def as_intrinsics_matrix(intrinsics):
     K[1, 1] = intrinsics[1]
     K[0, 2] = intrinsics[2]
     K[1, 2] = intrinsics[3]
+
     return K
 
 
 def sample_pdf(bins, weights, N_samples, det=False, device='cuda:0'):
     """
-    Hierarchical sampling in NeRF paper (section 5.2).
-
+    Hierarchical sampling in NeRF paper.
     """
     # Get pdf
     # weights = weights + 1e-5  # prevent nans
@@ -154,62 +152,32 @@ def get_samples(H0, H1, W0, W1, n, H, W, fx, fy, cx, cy, c2ws, depths, colors, d
 
     return rays_o.reshape(-1, 3), rays_d.reshape(-1, 3), sample_depth.reshape(-1), sample_color.reshape(-1, 3)
 
-def get_tensor_from_camera(RT, Tquad=False):
+def matrix_to_cam_pose(batch_matrices, RT=True):
     """
     Convert transformation matrix to quaternion and translation.
-
+    Args:
+        batch_matrices: (B, 4, 4)
+        RT: if True, return (B, 7) with [R, T], else return (B, 7) with [T, R]
+    Returns:
+        (B, 7) with [R, T] or [T, R]
     """
-    gpu_id = -1
-    if type(RT) == torch.Tensor:
-        if RT.get_device() != -1:
-            RT = RT.detach().cpu()
-            gpu_id = RT.get_device()
-        RT = RT.numpy()
-    from mathutils import Matrix
-    R, T = RT[:3, :3], RT[:3, 3]
-    rot = Matrix(R)
-    quad = rot.to_quaternion()
-    if Tquad:
-        tensor = np.concatenate([T, quad], 0)
+    if RT:
+        return torch.cat([matrix_to_quaternion(batch_matrices[:,:3,:3]), batch_matrices[:,:3,3]], dim=-1)
     else:
-        tensor = np.concatenate([quad, T], 0)
-    tensor = torch.from_numpy(tensor).float()
-    if gpu_id != -1:
-        tensor = tensor.to(gpu_id)
-    return tensor
-
-def axis_angle_to_matrix(data):
-    batch_dims = data.shape[:-1]
-
-    theta = torch.norm(data, dim=-1, keepdim=True)
-    omega = data / theta
-
-    omega1 = omega[...,0:1]
-    omega2 = omega[...,1:2]
-    omega3 = omega[...,2:3]
-    zeros = torch.zeros_like(omega1)
-
-    K = torch.concat([torch.concat([zeros, -omega3, omega2], dim=-1)[...,None,:],
-                      torch.concat([omega3, zeros, -omega1], dim=-1)[...,None,:],
-                      torch.concat([-omega2, omega1, zeros], dim=-1)[...,None,:]], dim=-2)
-    I = torch.eye(3, device=data.device).expand(*batch_dims,3,3)
-
-    return I + torch.sin(theta).unsqueeze(-1) * K + (1. - torch.cos(theta).unsqueeze(-1)) * (K @ K)
-
-def matrix_to_axis_angle(rot):
-    """
-    :param rot: [N, 3, 3]
-    :return:
-    """
-    return quaternion_to_axis_angle(matrix_to_quaternion(rot))
-
-def matrix_to_cam_pose(batch_matrices):
-    return torch.cat([matrix_to_quaternion(batch_matrices[:,:3,:3]), batch_matrices[:,:3,3]], dim=-1)
+        return torch.cat([batch_matrices[:, :3, 3], matrix_to_quaternion(batch_matrices[:, :3, :3])], dim=-1)
 
 def cam_pose_to_matrix(batch_poses):
+    """
+    Convert quaternion and translation to transformation matrix.
+    Args:
+        batch_poses: (B, 7) with [R, T] or [T, R]
+    Returns:
+        (B, 4, 4) transformation matrix
+    """
     c2w = torch.eye(4, device=batch_poses.device).unsqueeze(0).repeat(batch_poses.shape[0], 1, 1)
     c2w[:,:3,:3] = quaternion_to_matrix(batch_poses[:,:4])
     c2w[:,:3,3] = batch_poses[:,4:]
+
     return c2w
 
 def get_rays(H, W, fx, fy, cx, cy, c2w, device):
@@ -235,14 +203,13 @@ def get_rays(H, W, fx, fy, cx, cy, c2w, device):
 
 def normalize_3d_coordinate(p, bound):
     """
-    Normalize coordinate to [-1, 1], corresponds to the bounding box given.
-
+    Normalize 3d coordinate to [-1, 1] range.
     Args:
-        p (tensor, N*3): coordinate.
-        bound (tensor, 3*2): the scene bound.
-
+        p: (N, 3) 3d coordinate
+        bound: (3, 2) min and max of each dimension
     Returns:
-        p (tensor, N*3): normalized coordinate.
+        (N, 3) normalized 3d coordinate
+
     """
     p = p.reshape(-1, 3)
     p[:, 0] = ((p[:, 0]-bound[0, 0])/(bound[0, 1]-bound[0, 0]))*2-1.0

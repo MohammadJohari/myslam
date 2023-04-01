@@ -31,7 +31,7 @@ from tqdm import tqdm
 
 from src.common import (matrix_to_cam_pose, cam_pose_to_matrix, get_samples)
 from src.utils.datasets import get_dataset
-from src.utils.Visualizer import Visualizer
+from src.utils.Frame_Visualizer import Frame_Visualizer
 
 class Tracker(object):
     """
@@ -89,9 +89,9 @@ class Tracker(object):
         self.frame_loader = DataLoader(self.frame_reader, batch_size=1, shuffle=False,
                                        num_workers=1, pin_memory=True, prefetch_factor=2)
 
-        self.visualizer = Visualizer(freq=cfg['tracking']['vis_freq'], inside_freq=cfg['tracking']['vis_inside_freq'],
-                                     vis_dir=os.path.join(self.output, 'tracking_vis'), renderer=self.renderer,
-                                     truncation=self.truncation, verbose=self.verbose, device=self.device)
+        self.visualizer = Frame_Visualizer(freq=cfg['tracking']['vis_freq'], inside_freq=cfg['tracking']['vis_inside_freq'],
+                                           vis_dir=os.path.join(self.output, 'tracking_vis'), renderer=self.renderer,
+                                           truncation=self.truncation, verbose=self.verbose, device=self.device)
 
         self.H, self.W, self.fx, self.fy, self.cx, self.cy = slam.H, slam.W, slam.fx, slam.fy, slam.cx, slam.cy
 
@@ -273,7 +273,7 @@ class Tracker(object):
             if idx == 0 or self.gt_camera:
                 c2w = gt_c2w
                 if not self.no_vis_on_first_frame:
-                    self.visualizer.vis(idx, 0, gt_depth, gt_color, c2w.squeeze(), all_planes, self.decoders)
+                    self.visualizer.save_imgs(idx, 0, gt_depth, gt_color, c2w.squeeze(), all_planes, self.decoders)
 
             else:
                 if self.const_speed_assumption and idx - 2 >= 0:
@@ -296,7 +296,7 @@ class Tracker(object):
                 for cam_iter in range(self.num_cam_iters):
                     cam_pose = torch.cat([R, T], -1)
 
-                    self.visualizer.vis(idx, cam_iter, gt_depth, gt_color, cam_pose, all_planes, self.decoders)
+                    self.visualizer.save_imgs(idx, cam_iter, gt_depth, gt_color, cam_pose, all_planes, self.decoders)
 
                     loss = self.optimize_tracking(cam_pose, gt_color, gt_depth, self.tracking_pixels, optimizer_camera)
                     if loss < current_min_loss:

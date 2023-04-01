@@ -28,13 +28,25 @@ import torch.nn.functional as F
 import trimesh
 from tqdm import tqdm
 
-import os
 import sys
 sys.path.append('.')
 from src.utils.datasets import get_dataset
 from src import config
 
 def cull_mesh(mesh_file, cfg, args, device, estimate_c2w_list=None):
+    """
+    Cull the mesh by removing the points that are not visible in any of the frames.
+    The output mesh file will be saved in the same directory as the input mesh file.
+    Args:
+        mesh_file (str): path to the mesh file
+        cfg (dict): configuration
+        args (argparse.Namespace): arguments
+        device (torch.device): device
+        estimate_c2w_list (list): list of estimated camera poses, if None, it uses the ground truth camera poses
+    Returns:
+        None
+
+    """
     frame_reader = get_dataset(cfg, args, 1, device=device)
 
     eval_rec = cfg['meshing']['eval_rec']
@@ -101,6 +113,7 @@ def cull_mesh(mesh_file, cfg, args, device, estimate_c2w_list=None):
 
     mesh.export(output_file)
 
+## It is also possible to use the cull_mesh function in the following way, where the ground truth camera poses are used.
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(
         description='Arguments to cull the mesh.'
