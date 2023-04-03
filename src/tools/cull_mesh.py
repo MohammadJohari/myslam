@@ -61,7 +61,7 @@ def cull_mesh(mesh_file, cfg, args, device, estimate_c2w_list=None):
     mesh = trimesh.load(mesh_file, process=False)
     pc = mesh.vertices
 
-    whole_mask = np.ones(pc.shape[0]).astype(np.bool)
+    whole_mask = np.ones(pc.shape[0]).astype('bool')
     for i in tqdm(range(0, n_imgs, 1)):
         _, _, depth, c2w = frame_reader[i]
         depth, c2w = depth.to(device), c2w.to(device)

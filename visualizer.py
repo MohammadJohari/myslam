@@ -35,18 +35,13 @@ from src.tools.visualizer_util import SLAMFrontend
 
 if __name__ == '__main__':
 
-    parser = argparse.ArgumentParser(
-        description='Arguments to visualize the SLAM process.'
-    )
+    parser = argparse.ArgumentParser(description='Arguments to visualize the SLAM process.')
     parser.add_argument('config', type=str, help='Path to config file.')
-    parser.add_argument('--input_folder', type=str,
-                        help='input folder, this have higher priority, can overwrite the one in config file')
     parser.add_argument('--output', type=str,
                         help='output folder, this have higher priority, can overwrite the one inconfig file')
     parser.add_argument('--save_rendering',
                         action='store_true', help='save rendering video to `save_imgs.mp4` in output folder ')
-    parser.add_argument('--no_gt_traj',
-                        action='store_true', help='not visualize gt trajectory')
+    parser.add_argument('--no_gt_traj', action='store_true', help='not visualize gt trajectory')
     args = parser.parse_args()
     cfg = config.load_config(args.config, 'configs/ESLAM.yaml')
     scale = cfg['scale']
@@ -104,4 +99,4 @@ if __name__ == '__main__':
 
                 if args.save_rendering:
                     time.sleep(1)
-                    os.system(f"/usr/bin/ffmpeg -f image2 -r 30 -pattern_type glob -i '{output}/tmp_rendering/*.jpg' -y {output}/save_imgs.mp4")
+                    os.system(f"/usr/bin/ffmpeg -f image2 -r 30 -pattern_type glob -i '{output}/tmp_rendering/*.jpg' -y {output}/vis.mp4")

@@ -41,7 +41,10 @@ torch.multiprocessing.set_sharing_strategy('file_system')
 class ESLAM():
     """
     ESLAM main class.
-    Mainly allocate shared resources, and dispatch mapping and tracking process.
+    Mainly allocate shared resources, and dispatch mapping and tracking processes.
+    Args:
+        cfg (dict): config dict
+        args (argparse.Namespace): arguments
     """
 
     def __init__(self, cfg, args):

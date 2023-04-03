@@ -32,7 +32,7 @@ and you can run ESLAM:
 ```bash
 python -W ignore run.py configs/Replica/room0.yaml
 ```
-The mesh for evaluation is saved as `$OUTPUT_FOLDER/mesh/final_mesh_eval_rec_culled.ply`, where the unseen and occluded regions are culled using all frames. The mesh for visualization is saved as `$OUTPUT_FOLDER/mesh/final_mesh_eval_rec.ply`. 
+The mesh for evaluation is saved as `$OUTPUT_FOLDER/mesh/final_mesh_eval_rec_culled.ply`, where the unseen and occluded regions are culled using all frames.
 
 
 ### ScanNet
@@ -73,6 +73,18 @@ Once the data is downloaded and set up properly, you can run ESLAM:
 ```bash
 python -W ignore run.py configs/ScanNet/scene0000.yaml
 ```
+The final mesh is saved as `$OUTPUT_FOLDER/mesh/final_mesh_culled.ply`.
+
+### TUM RGB-D
+Download the data as below and the data is saved into the `./Datasets/TUM` folder.
+```bash
+bash scripts/download_tum.sh
+```
+and you can run ESLAM:
+```bash
+python -W ignore run.py configs/TUM_RGBD/freiburg1_desk.yaml
+```
+The final mesh is saved as `$OUTPUT_FOLDER/mesh/final_mesh_culled.ply`.
 
 ## Evaluation
 
@@ -105,7 +117,7 @@ python src/tools/eval_recon.py --rec_mesh $OUTPUT_FOLDER/mesh/final_mesh_eval_re
 ```
 
 ## Visualizing ESLAM Results
-For visualizing the results, we recommend to set `mesh_freq:40` in [configs/ESLAM.yaml](configs/ESLAM.yaml) and run ESLAM from scratch.
+For visualizing the results, we recommend to set `mesh_freq: 40` in [configs/ESLAM.yaml](configs/ESLAM.yaml) and run ESLAM from scratch.
 
 After ESLAM is trained, run the following command for visualization.
 
@@ -114,11 +126,32 @@ python visualizer.py configs/Replica/room0.yaml --output output/Replica/room0 --
 ```
 The result of the visualization will be saved at `output/Replica/room0/vis.mp4`. The green trajectory indicates the ground truth trajectory, and the red one is the trajectory of ESLAM.
 
-Note: `mesh_freq:40` means extracting a mesh every 40 input frames. Since extracting a mesh with a high resolution takes some time, for faster running of ESLAM for visualization set `meshing resolution` in [configs/Replica/replica.yaml](configs/Replica/replica.yaml) to a higher value before running ESLAM (*e.g.*, 5 cm).
+Note: `mesh_freq: 40` means extracting a mesh every 40 input frames. Since extracting a mesh with a high resolution takes some time, for faster running of ESLAM for visualization set `meshing resolution` in [configs/Replica/replica.yaml](configs/Replica/replica.yaml) to a higher value before running ESLAM (*e.g.*, 5 cm).
 
 ### Visualizer Command line arguments
 - `--output $OUTPUT_FOLDER` output folder (overwrite the output folder in the config file)  
-- `--input_folder $INPUT_FOLDER` input folder (overwrite the input folder in the config file) 
 - `--save_rendering` save rendering video to `vis.mp4` in the output folder
 - `--no_gt_traj` do not show ground truth trajectory
-- `--vis_input_frame` opens up a viewer to show input frames.
+
+## Related Repositories
+We would like to extend our gratitude to the authors of [NICE-SLAM](https://github.com/cvg/nice-slam) for their 
+exceptional work. Their code served as a valuable foundation for our own project, and we are appreciative of the 
+effort they put into their work.
+
+## Contact
+You can contact the author through email: mohammad.johari At idiap.ch.
+
+## Citing
+If you find our work useful, please consider citing:
+```BibTeX
+@inproceedings{johari-et-al-2023,
+  author = {Johari, M. M. and Carta, C. and Fleuret, F.},
+  title = {{ESLAM}: Efficient Dense SLAM System Based on Hybrid Representation of Signed Distance Fields},
+  booktitle = {Proceedings of the IEEE international conference on Computer Vision and Pattern Recognition (CVPR)},
+  year = {2023},
+  type = {Highlight}
+}
+```
+
+### Acknowledgement
+This work was supported by ams OSRAM.

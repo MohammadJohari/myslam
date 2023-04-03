@@ -31,19 +31,26 @@ from src.utils.datasets import get_dataset
 class Mesher(object):
     """
     Mesher class.
+    Args:
+        cfg (dict): configuration dictionary.
+        args (argparse.Namespace): arguments.
+        eslam (ESLAM): ESLAM object.
+        points_batch_size (int): number of points to be processed in each batch.
+        ray_batch_size (int): number of rays to be processed in each batch.
+
     """
-    def __init__(self, cfg, args, slam, points_batch_size=500000, ray_batch_size=100000):
+    def __init__(self, cfg, args, eslam, points_batch_size=500000, ray_batch_size=100000):
         self.points_batch_size = points_batch_size
         self.ray_batch_size = ray_batch_size
-        self.renderer = slam.renderer
+        self.renderer = eslam.renderer
         self.scale = cfg['scale']
 
         self.resolution = cfg['meshing']['resolution']
         self.level_set = cfg['meshing']['level_set']
         self.mesh_bound_scale = cfg['meshing']['mesh_bound_scale']
 
-        self.bound = slam.bound
-        self.verbose = slam.verbose
+        self.bound = eslam.bound
+        self.verbose = eslam.verbose
 
         self.marching_cubes_bound = torch.from_numpy(
             np.array(cfg['mapping']['marching_cubes_bound']) * self.scale)
@@ -51,7 +58,7 @@ class Mesher(object):
         self.frame_reader = get_dataset(cfg, args, self.scale, device='cpu')
         self.n_img = len(self.frame_reader)
 
-        self.H, self.W, self.fx, self.fy, self.cx, self.cy = slam.H, slam.W, slam.fx, slam.fy, slam.cx, slam.cy
+        self.H, self.W, self.fx, self.fy, self.cx, self.cy = eslam.H, eslam.W, eslam.fx, eslam.fy, eslam.cx, eslam.cy
 
     def get_bound_from_frames(self, keyframe_dict, scale=1):
         """

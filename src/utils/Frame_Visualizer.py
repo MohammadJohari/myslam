@@ -30,6 +30,14 @@ class Frame_Visualizer(object):
     """
     Visualizes itermediate results, render out depth and color images.
     It can be called per iteration, which is good for debuging (to see how each tracking/mapping iteration performs).
+    Args:
+        freq (int): frequency of visualization.
+        inside_freq (int): frequency of visualization inside each iteration.
+        vis_dir (str): directory to save the visualization results.
+        renderer (Renderer): renderer.
+        truncation (float): truncation distance.
+        verbose (bool): whether to print out the visualization results.
+        device (str): device.
     """
 
     def __init__(self, freq, inside_freq, vis_dir, renderer, truncation, verbose, device='cuda:0'):

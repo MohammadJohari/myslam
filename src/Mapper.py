@@ -36,36 +36,40 @@ from src.tools.cull_mesh import cull_mesh
 
 class Mapper(object):
     """
-    Tracking main class.
+    Mapping main class.
+    Args:
+        cfg (dict): config dict
+        args (argparse.Namespace): arguments
+        eslam (ESLAM): ESLAM object
     """
 
-    def __init__(self, cfg, args, slam):
+    def __init__(self, cfg, args, eslam):
 
         self.cfg = cfg
         self.args = args
 
-        self.idx = slam.idx
-        self.truncation = slam.truncation
-        self.bound = slam.bound
-        self.logger = slam.logger
-        self.mesher = slam.mesher
-        self.output = slam.output
-        self.verbose = slam.verbose
-        self.renderer = slam.renderer
-        self.mapping_idx = slam.mapping_idx
-        self.mapping_cnt = slam.mapping_cnt
-        self.decoders = slam.shared_decoders
+        self.idx = eslam.idx
+        self.truncation = eslam.truncation
+        self.bound = eslam.bound
+        self.logger = eslam.logger
+        self.mesher = eslam.mesher
+        self.output = eslam.output
+        self.verbose = eslam.verbose
+        self.renderer = eslam.renderer
+        self.mapping_idx = eslam.mapping_idx
+        self.mapping_cnt = eslam.mapping_cnt
+        self.decoders = eslam.shared_decoders
 
-        self.planes_xy = slam.shared_planes_xy
-        self.planes_xz = slam.shared_planes_xz
-        self.planes_yz = slam.shared_planes_yz
+        self.planes_xy = eslam.shared_planes_xy
+        self.planes_xz = eslam.shared_planes_xz
+        self.planes_yz = eslam.shared_planes_yz
 
-        self.c_planes_xy = slam.shared_c_planes_xy
-        self.c_planes_xz = slam.shared_c_planes_xz
-        self.c_planes_yz = slam.shared_c_planes_yz
+        self.c_planes_xy = eslam.shared_c_planes_xy
+        self.c_planes_xz = eslam.shared_c_planes_xz
+        self.c_planes_yz = eslam.shared_c_planes_yz
 
-        self.estimate_c2w_list = slam.estimate_c2w_list
-        self.mapping_first_frame = slam.mapping_first_frame
+        self.estimate_c2w_list = eslam.estimate_c2w_list
+        self.mapping_first_frame = eslam.mapping_first_frame
 
         self.scale = cfg['scale']
         self.device = cfg['device']
@@ -101,7 +105,7 @@ class Mapper(object):
                                            vis_dir=os.path.join(self.output, 'mapping_vis'), renderer=self.renderer,
                                            truncation=self.truncation, verbose=self.verbose, device=self.device)
 
-        self.H, self.W, self.fx, self.fy, self.cx, self.cy = slam.H, slam.W, slam.fx, slam.fy, slam.cx, slam.cy
+        self.H, self.W, self.fx, self.fy, self.cx, self.cy = eslam.H, eslam.W, eslam.fx, eslam.fy, eslam.cx, eslam.cy
 
     def sdf_losses(self, sdf, z_vals, gt_depth):
         """

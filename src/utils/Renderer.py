@@ -26,19 +26,22 @@ from src.common import get_rays, sample_pdf, normalize_3d_coordinate
 class Renderer(object):
     """
     Renderer class for rendering depth and color.
+    Args:
+        cfg (dict): configuration.
+        eslam (ESLAM): ESLAM object.
+        ray_batch_size (int): batch size for sampling rays.
     """
-    def __init__(self, cfg, slam, points_batch_size=500000, ray_batch_size=10000):
+    def __init__(self, cfg, eslam, ray_batch_size=10000):
         self.ray_batch_size = ray_batch_size
-        self.points_batch_size = points_batch_size
 
         self.perturb = cfg['rendering']['perturb']
         self.n_stratified = cfg['rendering']['n_stratified']
         self.n_importance = cfg['rendering']['n_importance']
 
         self.scale = cfg['scale']
-        self.bound = slam.bound.to(slam.device, non_blocking=True)
+        self.bound = eslam.bound.to(eslam.device, non_blocking=True)
 
-        self.H, self.W, self.fx, self.fy, self.cx, self.cy = slam.H, slam.W, slam.fx, slam.fy, slam.cx, slam.cy
+        self.H, self.W, self.fx, self.fy, self.cx, self.cy = eslam.H, eslam.W, eslam.fx, eslam.fy, eslam.cx, eslam.cy
 
     def perturbation(self, z_vals):
         """

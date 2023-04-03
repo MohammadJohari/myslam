@@ -36,34 +36,37 @@ from src.utils.Frame_Visualizer import Frame_Visualizer
 class Tracker(object):
     """
     Tracking main class.
+    Args:
+        cfg (dict): config dict
+        args (argparse.Namespace): arguments
+        eslam (ESLAM): ESLAM object
     """
-    def __init__(self, cfg, args, slam
-                 ):
+    def __init__(self, cfg, args, eslam):
         self.cfg = cfg
         self.args = args
 
         self.scale = cfg['scale']
 
-        self.idx = slam.idx
-        self.bound = slam.bound
-        self.mesher = slam.mesher
-        self.output = slam.output
-        self.verbose = slam.verbose
-        self.renderer = slam.renderer
-        self.gt_c2w_list = slam.gt_c2w_list
-        self.mapping_idx = slam.mapping_idx
-        self.mapping_cnt = slam.mapping_cnt
-        self.shared_decoders = slam.shared_decoders
-        self.estimate_c2w_list = slam.estimate_c2w_list
-        self.truncation = slam.truncation
+        self.idx = eslam.idx
+        self.bound = eslam.bound
+        self.mesher = eslam.mesher
+        self.output = eslam.output
+        self.verbose = eslam.verbose
+        self.renderer = eslam.renderer
+        self.gt_c2w_list = eslam.gt_c2w_list
+        self.mapping_idx = eslam.mapping_idx
+        self.mapping_cnt = eslam.mapping_cnt
+        self.shared_decoders = eslam.shared_decoders
+        self.estimate_c2w_list = eslam.estimate_c2w_list
+        self.truncation = eslam.truncation
 
-        self.shared_planes_xy = slam.shared_planes_xy
-        self.shared_planes_xz = slam.shared_planes_xz
-        self.shared_planes_yz = slam.shared_planes_yz
+        self.shared_planes_xy = eslam.shared_planes_xy
+        self.shared_planes_xz = eslam.shared_planes_xz
+        self.shared_planes_yz = eslam.shared_planes_yz
 
-        self.shared_c_planes_xy = slam.shared_c_planes_xy
-        self.shared_c_planes_xz = slam.shared_c_planes_xz
-        self.shared_c_planes_yz = slam.shared_c_planes_yz
+        self.shared_c_planes_xy = eslam.shared_c_planes_xy
+        self.shared_c_planes_xz = eslam.shared_c_planes_xz
+        self.shared_c_planes_yz = eslam.shared_c_planes_yz
 
         self.cam_lr_T = cfg['tracking']['lr_T']
         self.cam_lr_R = cfg['tracking']['lr_R']
@@ -93,7 +96,7 @@ class Tracker(object):
                                            vis_dir=os.path.join(self.output, 'tracking_vis'), renderer=self.renderer,
                                            truncation=self.truncation, verbose=self.verbose, device=self.device)
 
-        self.H, self.W, self.fx, self.fy, self.cx, self.cy = slam.H, slam.W, slam.fx, slam.fy, slam.cx, slam.cy
+        self.H, self.W, self.fx, self.fy, self.cx, self.cy = eslam.H, eslam.W, eslam.fx, eslam.fy, eslam.cx, eslam.cy
 
         self.decoders = copy.deepcopy(self.shared_decoders)
 

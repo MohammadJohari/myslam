@@ -3,28 +3,17 @@ meshing:
   resolution: 0.01 #cm # Increase this number to speed up meshing algorithm
   eval_rec: False
 tracking:
-  vis_freq: 500
-  vis_inside_freq: 25
   ignore_edge_W: 20
   ignore_edge_H: 20
-  const_speed_assumption: True
-  gt_camera: False
   lr_T: 0.01
   lr_R: 0.002
   pixels: 5000
   iters: 200
 mapping:
   every_frame: 1
-  vis_freq: 500
-  vis_inside_freq: 25
-  mesh_freq: 500
-  ckpt_freq: 500
   keyframe_every: 1
-  mapping_window_size: 20
   pixels: 5000
-  iters_first: 1000
   iters: 60
-
 cam:  #NOTE: intrinsic is different per scene in TUM
   H: 480
   W: 640
@@ -37,4 +26,4 @@ cam:  #NOTE: intrinsic is different per scene in TUM
 rendering:
   n_stratified: 48
   n_importance: 8
-  learnable_beta: True
+  learnable_beta: False

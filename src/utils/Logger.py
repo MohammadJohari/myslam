@@ -29,12 +29,12 @@ class Logger(object):
 
     """
 
-    def __init__(self, slam):
-        self.verbose = slam.verbose
-        self.ckptsdir = slam.ckptsdir
-        self.gt_c2w_list = slam.gt_c2w_list
-        self.shared_decoders = slam.shared_decoders
-        self.estimate_c2w_list = slam.estimate_c2w_list
+    def __init__(self, eslam):
+        self.verbose = eslam.verbose
+        self.ckptsdir = eslam.ckptsdir
+        self.gt_c2w_list = eslam.gt_c2w_list
+        self.shared_decoders = eslam.shared_decoders
+        self.estimate_c2w_list = eslam.estimate_c2w_list
 
     def log(self, idx, keyframe_list):
         path = os.path.join(self.ckptsdir, '{:05d}.tar'.format(idx))

@@ -38,9 +38,9 @@ def main():
 
     cfg = config.load_config(args.config, 'configs/ESLAM.yaml')
     
-    slam = ESLAM(cfg, args)
+    eslam = ESLAM(cfg, args)
 
-    slam.run()
+    eslam.run()
 
 if __name__ == '__main__':
     main()
