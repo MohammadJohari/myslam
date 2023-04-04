@@ -20,6 +20,7 @@ sudo apt-get install libopenexr-dev
 conda env create -f environment.yaml
 conda activate eslam
 ```
+If desired, the Open3D package can be installed in the [headless rendering](http://www.open3d.org/docs/latest/tutorial/Advanced/headless_rendering.html) mode. This is useful for running ESLAM on a server without a display. We recommend to install from [this commit](https://github.com/isl-org/Open3D/tree/v0.15.1) as we observed bugs in other releases of Open3D.
 
 ## Run
 
@@ -122,14 +123,15 @@ For visualizing the results, we recommend to set `mesh_freq: 40` in [configs/ESL
 After ESLAM is trained, run the following command for visualization.
 
 ```bash
-python visualizer.py configs/Replica/room0.yaml --output output/Replica/room0 --save_rendering
+python visualizer.py configs/Replica/room0.yaml --output output/Replica/room0 --top_view --save_rendering
 ```
 The result of the visualization will be saved at `output/Replica/room0/vis.mp4`. The green trajectory indicates the ground truth trajectory, and the red one is the trajectory of ESLAM.
 
 Note: `mesh_freq: 40` means extracting a mesh every 40 input frames. Since extracting a mesh with a high resolution takes some time, for faster running of ESLAM for visualization set `meshing resolution` in [configs/Replica/replica.yaml](configs/Replica/replica.yaml) to a higher value before running ESLAM (*e.g.*, 5 cm).
 
 ### Visualizer Command line arguments
-- `--output $OUTPUT_FOLDER` output folder (overwrite the output folder in the config file)  
+- `--output $OUTPUT_FOLDER` output folder (overwrite the output folder in the config file)
+- `--top_view` set the camera to top view. Otherwise, the camera is set to the first frame of the sequence
 - `--save_rendering` save rendering video to `vis.mp4` in the output folder
 - `--no_gt_traj` do not show ground truth trajectory
 

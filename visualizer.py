@@ -41,6 +41,8 @@ if __name__ == '__main__':
                         help='output folder, this have higher priority, can overwrite the one inconfig file')
     parser.add_argument('--save_rendering',
                         action='store_true', help='save rendering video to `save_imgs.mp4` in output folder ')
+    parser.add_argument('--top_view',
+                        action='store_true', help='Setting the camera to top view. Otherwise, the camera is at the first frame\'s pose.')
     parser.add_argument('--no_gt_traj', action='store_true', help='not visualize gt trajectory')
     args = parser.parse_args()
     cfg = config.load_config(args.config, 'configs/ESLAM.yaml')
@@ -67,15 +69,18 @@ if __name__ == '__main__':
             gt_c2w_list = gt_c2w_list.cpu().numpy()
 
             ## Setting view point ##
-            # get the latest .ply file in the "mesh" folder and use it to set the view point
             meshfile = sorted(glob.glob(f'{output}/mesh/*.ply'))[-1]
             if os.path.isfile(meshfile):
-                mesh = trimesh.load(meshfile, process=False)
-                to_origin, _ = trimesh.bounds.oriented_bounds(mesh, ordered=False)
-                init_pose = np.eye(4)
-                init_pose = np.linalg.inv(to_origin) @ init_pose
+                if args.top_view:
+                    # get the latest .ply file in the "mesh" folder and use it to set the view point
+                    mesh = trimesh.load(meshfile, process=False)
+                    to_origin, _ = trimesh.bounds.oriented_bounds(mesh, ordered=False)
+                    init_pose = np.eye(4)
+                    init_pose = np.linalg.inv(to_origin) @ init_pose
+                else:
+                    init_pose = gt_c2w_list[0].copy()
 
-                frontend = SLAMFrontend(output, init_pose=init_pose, cam_scale=0.25,
+                frontend = SLAMFrontend(output, init_pose=init_pose, cam_scale=0.2,
                                         save_rendering=args.save_rendering, near=0,
                                         estimate_c2w_list=estimate_c2w_list, gt_c2w_list=gt_c2w_list)
                 frontend.start()
@@ -94,8 +99,8 @@ if __name__ == '__main__':
                             frontend.update_cam_trajectory(i, gt=True)
                     time.sleep(wait_time)
 
-                time.sleep(1)
                 frontend.terminate()
+                time.sleep(1)
 
                 if args.save_rendering:
                     time.sleep(1)

@@ -28,16 +28,18 @@ import numpy as np
 import open3d as o3d
 import torch
 
+
 def normalize(x):
     return x / np.linalg.norm(x)
 
+
 def create_camera_actor(i, is_gt=False, scale=0.005):
     cam_points = scale * np.array([
-        [0,   0,   0],
-        [-1,  -1, 1.5],
-        [1,  -1, 1.5],
-        [1,   1, 1.5],
-        [-1,   1, 1.5],
+        [0, 0, 0],
+        [-1, -1, 1.5],
+        [1, -1, 1.5],
+        [1, 1, 1.5],
+        [-1, 1, 1.5],
         [-0.5, 1, 1.5],
         [0.5, 1, 1.5],
         [0, 1.2, 1.5]])
@@ -46,12 +48,9 @@ def create_camera_actor(i, is_gt=False, scale=0.005):
                           [1, 0], [0, 2], [3, 0], [0, 4], [5, 7], [7, 6]])
     points = []
     for cam_line in cam_lines:
-        begin_points, end_points = cam_points[cam_line[0]
-                                              ], cam_points[cam_line[1]]
+        begin_points, end_points = cam_points[cam_line[0]], cam_points[cam_line[1]]
         t_vals = np.linspace(0., 1., 100)
-        begin_points, end_points
-        point = begin_points[None, :] * \
-            (1.-t_vals)[:, None] + end_points[None, :] * (t_vals)[:, None]
+        point = begin_points[None, :] * (1. - t_vals)[:, None] + end_points[None, :] * (t_vals)[:, None]
         points.append(point)
     points = np.concatenate(points)
     color = (0.0, 1.0, 0.0) if is_gt else (1.0, .0, .0)
@@ -191,7 +190,6 @@ def draw_trajectory(queue, output, init_pose, cam_scale,
     param = ctr.convert_to_pinhole_camera_parameters()
     ## Zooming level
     init_pose[:3, 3] += 4.0 * normalize(init_pose[:3, 2])
-    # init_pose[:3, 3] += 6 * normalize(init_pose[:3, 2])
     init_pose[:3, 2] *= -1
     init_pose[:3, 1] *= -1
     init_pose = np.linalg.inv(init_pose)
@@ -217,7 +215,7 @@ class SLAMFrontend:
 
         pose[:3, 2] *= -1
         self.queue.put_nowait(('pose', index, pose, gt))
-        
+
     def update_mesh(self, path):
         self.queue.put_nowait(('mesh', path))
 
@@ -225,7 +223,7 @@ class SLAMFrontend:
         self.queue.put_nowait(('traj', c2w_list, gt))
 
     def reset(self):
-        self.queue.put_nowait(('reset', ))
+        self.queue.put_nowait(('reset',))
 
     def start(self):
         self.p.start()

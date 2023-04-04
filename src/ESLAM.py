@@ -167,7 +167,7 @@ class ESLAM():
         # scale the bound if there is a global scaling factor
         self.bound = torch.from_numpy(np.array(cfg['mapping']['bound'])*self.scale).float()
         bound_dividable = cfg['planes_res']['bound_dividable']
-        # enlarge the bound a bit to allow it divisable by bound_divisable
+        # enlarge the bound a bit to allow it dividable by bound_dividable
         self.bound[:, 1] = (((self.bound[:, 1]-self.bound[:, 0]) /
                             bound_dividable).int()+1)*bound_dividable+self.bound[:, 0]
         self.shared_decoders.bound = self.bound
